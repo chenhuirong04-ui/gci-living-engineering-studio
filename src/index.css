@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  /* Brand Colors */
+  --color-brand-ivory: #FDFBF7;
+  --color-brand-beige: #F7F3EE;
+  --color-brand-brown: #3E2723;
+  --color-brand-brown-muted: #5D4037;
+  --color-brand-gold: #C5A059;
+  --color-brand-gold-muted: #D4C4A8;
+}
+
+@layer base {
+  body {
+    -webkit-print-color-adjust: exact;
+    @apply bg-brand-ivory text-brand-brown;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #quotation-print, #quotation-print * {
+    visibility: visible;
+  }
+  #quotation-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
