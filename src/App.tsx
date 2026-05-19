@@ -198,7 +198,16 @@ export default function App() {
   const [prices, setPrices] = useState<MaterialPrices>(DEFAULT_PRICES);
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
-  const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(false);
+  // Read URL params injected by DEAL (client, project, salesperson)
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _clientParam = _urlParams.get('client') || '';
+  const _projectParam = _urlParams.get('project') || '';
+  const _salespersonParam = _urlParams.get('salesperson') || '';
+  const _prefillName = _clientParam && _projectParam
+    ? `${_clientParam} - ${_projectParam}`
+    : _clientParam || _projectParam;
+
+  const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(!!_prefillName);
   const [quoteMode, setQuoteMode] = useState<'single' | 'package' | null>(null);
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
@@ -239,9 +248,9 @@ export default function App() {
   };
 
   const [quoteInfo, setQuoteInfo] = useState({
-    customerProjectName: '',
+    customerProjectName: _prefillName,
     phoneWhatsApp: '',
-    salesperson: '',
+    salesperson: _salespersonParam,
     quoteNumber: '',
     date: new Date().toISOString().split('T')[0]
   });
