@@ -198,11 +198,13 @@ export default function App() {
   const [prices, setPrices] = useState<MaterialPrices>(DEFAULT_PRICES);
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
-  // Read URL params injected by DEAL (client, project, salesperson)
+  // Read URL params injected by DEAL (client, project, salesperson, businessId, returnUrl)
   const _urlParams = new URLSearchParams(window.location.search);
   const _clientParam = _urlParams.get('client') || '';
   const _projectParam = _urlParams.get('project') || '';
   const _salespersonParam = _urlParams.get('salesperson') || '';
+  const _businessIdParam = _urlParams.get('businessId') || '';
+  const _returnUrlParam = _urlParams.get('returnUrl') || '';
   const _prefillName = _clientParam && _projectParam
     ? `${_clientParam} - ${_projectParam}`
     : _clientParam || _projectParam;
@@ -4218,6 +4220,23 @@ export default function App() {
       </AnimatePresence>
 
       <div className="max-w-7xl mx-auto px-6 py-6 lg:py-12">
+        {_returnUrlParam && (
+          <div className="mb-6 flex items-center justify-between px-5 py-2.5 bg-brand-brown rounded-2xl text-brand-ivory">
+            <a
+              href={_returnUrlParam}
+              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-brand-gold hover:text-brand-ivory transition-colors group"
+            >
+              <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" />
+              返回 DEAL 项目
+            </a>
+            <div className="flex items-center gap-5 text-[10px] font-bold uppercase tracking-widest text-brand-ivory/50">
+              {_clientParam && <span>客户：<span className="text-brand-ivory">{_clientParam}</span></span>}
+              {_projectParam && <span>项目：<span className="text-brand-ivory">{_projectParam}</span></span>}
+              {_businessIdParam && <span className="text-brand-gold/80">{_businessIdParam}</span>}
+              {_salespersonParam && <span>负责人：<span className="text-brand-ivory">{_salespersonParam}</span></span>}
+            </div>
+          </div>
+        )}
         <header className="mb-14 flex justify-between items-end border-b border-brand-brown/10 pb-10">
           <div>
             <div className="flex items-center gap-3 mb-4">
