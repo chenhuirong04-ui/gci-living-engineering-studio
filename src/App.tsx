@@ -1876,7 +1876,7 @@ export default function App() {
     <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
       <div className="text-center space-y-6">
         <div className="inline-block px-4 py-1.5 bg-brand-gold/10 rounded-full mb-2">
-          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-brand-gold">Studio Setup v4.0</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-brand-gold">Project Engineering Workspace</p>
         </div>
         <h2 className="text-5xl font-serif italic text-brand-brown tracking-tight">{t('Project Information')}</h2>
         <p className="text-xs font-medium text-brand-brown-muted max-w-xl mx-auto leading-relaxed">
@@ -2693,7 +2693,7 @@ export default function App() {
           <div className="text-center space-y-3">
             <h2 className="text-3xl font-serif italic text-brand-brown">{t('Individual Item Quote')}</h2>
             <div className="w-24 h-px bg-brand-gold/30 mx-auto" />
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Fast technical configuration for individual pieces</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Custom-made furniture &amp; engineering items</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-6xl mx-auto">
             {Object.values(FurnitureCategory).map(cat => {
