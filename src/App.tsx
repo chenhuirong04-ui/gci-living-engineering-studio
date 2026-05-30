@@ -222,6 +222,7 @@ export default function App() {
   const [tradeItemNotes, setTradeItemNotes] = useState<Record<string, string>>({});
   const [tradeItemCurrencies, setTradeItemCurrencies] = useState<Record<string, string>>({});
   const [quoteGenerated, setQuoteGenerated] = useState(false);
+  const [tradeTerms, setTradeTerms] = useState<string>(''); // extracted terms / notes from supplier quote
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -448,6 +449,7 @@ export default function App() {
     setTradeItemNotes({});
     setTradeItemCurrencies({});
     setQuoteGenerated(false);
+    setTradeTerms('');
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -1663,11 +1665,21 @@ export default function App() {
         const name = String(row[excelMappings.item] || '').trim();
         
         // Skip conditions
-        const isHeader = name.toLowerCase().includes('item') || name.toLowerCase().includes('品名');
-        const isSerialOnly = /^\d+$/.test(name) || 
-                            ['no', 'no.', 's.no', 's.no.', '序号', '编号', 'sn', '序号.', '品名', '分项'].includes(name.toLowerCase()) ||
-                            name.length < 2 && /^\d$/.test(name);
+        const nameLower = name.toLowerCase();
+        const isHeader = nameLower.includes('item') || nameLower.includes('品名');
+        const isSerialOnly = /^\d+$/.test(name) ||
+                            ['no', 'no.', 's.no', 's.no.', '序号', '编号', 'sn', '序号.', '品名', '分项'].includes(nameLower) ||
+                            (name.length < 2 && /^\d$/.test(name));
         const isEmpty = !name || name === '0';
+        // Terms / conditions rows — route to tradeTerms, not product items
+        const TERM_KEYWORDS = ['payment', 'lead time', 'delivery time', 'validity', 'warranty', 'guarantee', 'remark', 'note', 'notes', 'condition', 'terms', 'incoterm', 'port of loading', 'port of discharge'];
+        const isTerm = TERM_KEYWORDS.some(k => nameLower.includes(k));
+        if (isTerm) {
+          // collect into tradeTerms
+          const termValue = String(row[excelMappings.spec] || row[excelMappings.price] || '').trim();
+          setTradeTerms(prev => prev ? `${prev}\n${name}${termValue ? ': ' + termValue : ''}` : `${name}${termValue ? ': ' + termValue : ''}`);
+          return null;
+        }
 
         if (isHeader || isSerialOnly || isEmpty) return null;
 
@@ -1703,27 +1715,35 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
       
       const prompt = `
-        Analyze this image of a client furniture requirement list or table.
-        Extract the items into a structured list. For each item, try to find:
-        - Item Name
-        - Specification/Size
-        - Quantity
-        - Unit
-        - Target Unit Price
-        - Target Total
-        
-        Return ONLY valid JSON as an array of objects matching this schema:
-        [
-          {
-            "originalName": "Item name",
-            "originalSpec": "Size/Spec",
-            "quantity": 1,
-            "unit": "pc",
-            "targetUnitPrice": 0,
-            "targetTotal": 0
-          }
-        ]
-        If data is missing, use default values. Be conservative with extraction.
+        Analyze this supplier quote / requirement list image.
+        Separate the content into TWO categories:
+
+        1. PRODUCT ITEMS: Real products or services with quantities and prices.
+        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions.
+
+        Do NOT include the following as product items (put them in terms instead):
+        - Payment / Payment terms
+        - Lead time / Delivery time
+        - Validity / Offer validity
+        - Warranty / Guarantee
+        - Remarks / Notes / Comments
+        - Any row that has no quantity or no price and is clearly a condition or remark
+
+        Return ONLY valid JSON in this exact format:
+        {
+          "items": [
+            {
+              "originalName": "Item name",
+              "originalSpec": "Size/Spec/Description",
+              "quantity": 1,
+              "unit": "pc",
+              "targetUnitPrice": 0,
+              "targetTotal": 0
+            }
+          ],
+          "terms": "Payment: ... | Lead time: ... | Notes: ..."
+        }
+        If no terms found, set terms to "". If no items found, set items to [].
       `;
 
       const response = await ai.models.generateContent({
@@ -1737,7 +1757,10 @@ export default function App() {
         config: { responseMimeType: "application/json" }
       });
 
-      const extractedItems = JSON.parse(response.text || '[]');
+      const parsed = JSON.parse(response.text || '{}');
+      const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const extractedTerms: string = parsed.terms || '';
+      if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-img-${Date.now()}-${idx}`,
@@ -1760,23 +1783,38 @@ export default function App() {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
       const prompt = `
-        Analyze the following text input which is a client furniture requirement list.
-        Parse it into a structured table.
-        
+        Analyze this supplier quote / requirement text.
+        Separate the content into TWO categories:
+
+        1. PRODUCT ITEMS: Real products or services with quantities and prices.
+        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions.
+
+        Do NOT include the following as product items (put them in terms instead):
+        - Payment / Payment terms
+        - Lead time / Delivery time
+        - Validity / Offer validity
+        - Warranty / Guarantee
+        - Remarks / Notes / Comments
+        - Any line that has no quantity or no price and is clearly a condition or remark
+
         Input Text:
         ${importText}
-        
-        Return ONLY valid JSON as an array of objects matching this schema:
-        [
-          {
-            "originalName": "Item name",
-            "originalSpec": "Size/Spec",
-            "quantity": 1,
-            "unit": "pc",
-            "targetUnitPrice": 0,
-            "targetTotal": 0
-          }
-        ]
+
+        Return ONLY valid JSON in this exact format:
+        {
+          "items": [
+            {
+              "originalName": "Item name",
+              "originalSpec": "Size/Spec/Description",
+              "quantity": 1,
+              "unit": "pc",
+              "targetUnitPrice": 0,
+              "targetTotal": 0
+            }
+          ],
+          "terms": "Payment: ... | Lead time: ... | Notes: ..."
+        }
+        If no terms found, set terms to "". If no items found, set items to [].
       `;
 
       const response = await ai.models.generateContent({
@@ -1785,7 +1823,10 @@ export default function App() {
         config: { responseMimeType: "application/json" }
       });
 
-      const extractedItems = JSON.parse(response.text || '[]');
+      const parsed = JSON.parse(response.text || '{}');
+      const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const extractedTerms: string = parsed.terms || '';
+      if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-text-${Date.now()}-${idx}`,
@@ -2830,25 +2871,25 @@ export default function App() {
           {/* Editable cost table */}
           <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
             {/* Header */}
-            <div className="grid grid-cols-12 gap-2 px-5 py-3 bg-[#0C1B3A] text-white text-[9px] font-black uppercase tracking-wider">
+            <div className="grid grid-cols-12 gap-3 px-6 py-3 bg-[#0C1B3A] text-white text-[10px] font-black uppercase tracking-wider">
               <div className="col-span-3">Item Name</div>
               <div className="col-span-3">Description / Spec</div>
               <div className="col-span-1 text-center">Qty</div>
               <div className="col-span-1 text-center">Unit</div>
-              <div className="col-span-2 text-right">Supplier Cost</div>
+              <div className="col-span-2 text-right">Unit Cost</div>
               <div className="col-span-1 text-center">CCY</div>
-              <div className="col-span-1 text-right">Notes</div>
+              <div className="col-span-1 text-right">Line Total</div>
             </div>
             {/* Rows */}
-            <div className="divide-y divide-[#0C1B3A]/5">
+            <div className="divide-y divide-[#0C1B3A]/6">
               {draftItems.map((item, idx) => (
-                <div key={item.id} className="grid grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-[#0C1B3A]/2 transition-colors">
+                <div key={item.id} className="grid grid-cols-12 gap-3 px-6 py-4 items-center hover:bg-[#0C1B3A]/2 transition-colors group">
                   {/* Item Name */}
                   <div className="col-span-3">
                     <input
                       value={item.originalName}
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalName: e.target.value } : it))}
-                      className="w-full text-[11px] font-bold text-[#0C1B3A] bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5 transition-colors"
+                      className="w-full text-[15px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1 transition-colors"
                     />
                   </div>
                   {/* Spec */}
@@ -2857,7 +2898,7 @@ export default function App() {
                       value={item.originalSpec || ''}
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalSpec: e.target.value } : it))}
                       placeholder="—"
-                      className="w-full text-[10px] text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none py-0.5 transition-colors placeholder:text-[#0C1B3A]/20"
+                      className="w-full text-[14px] text-[#0C1B3A]/55 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 transition-colors placeholder:text-[#0C1B3A]/20"
                     />
                   </div>
                   {/* Qty */}
@@ -2866,7 +2907,7 @@ export default function App() {
                       type="number" min="0" step="1"
                       value={item.quantity}
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: Number(e.target.value) || 0, targetTotal: (Number(e.target.value) || 0) * it.targetUnitPrice } : it))}
-                      className="w-full text-[11px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5"
+                      className="w-full text-[15px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1"
                     />
                   </div>
                   {/* Unit */}
@@ -2874,63 +2915,85 @@ export default function App() {
                     <input
                       value={item.unit}
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, unit: e.target.value } : it))}
-                      className="w-full text-[10px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none py-0.5"
+                      className="w-full text-[14px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1"
                     />
                   </div>
-                  {/* Supplier Cost per unit */}
+                  {/* Supplier Unit Cost */}
                   <div className="col-span-2 text-right">
                     <input
                       type="number" min="0" step="0.01"
                       value={item.targetUnitPrice || ''}
                       placeholder="0.00"
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value) || 0, targetTotal: (Number(e.target.value) || 0) * it.quantity } : it))}
-                      className="w-full text-right text-[11px] font-mono font-black text-[#0C1B3A] bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5"
+                      className="w-full text-right text-[15px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1"
                     />
-                    <p className="text-[8px] text-[#0C1B3A]/25 text-right mt-0.5">Total: {(item.targetUnitPrice * item.quantity).toFixed(2)}</p>
+                    <p className="text-[11px] text-[#0C1B3A]/30 text-right mt-1 font-mono">unit price</p>
                   </div>
                   {/* Currency */}
                   <div className="col-span-1 text-center">
                     <select
                       value={tradeItemCurrencies[item.id] || 'AED'}
                       onChange={e => setTradeItemCurrencies(prev => ({ ...prev, [item.id]: e.target.value }))}
-                      className="text-[9px] font-bold text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 outline-none w-full text-center"
+                      className="text-[12px] font-bold text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 outline-none w-full text-center pb-1"
                     >
                       {['AED','USD','CNY','EUR','GBP'].map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
-                  {/* Notes + Delete */}
-                  <div className="col-span-1 flex items-center gap-1">
-                    <input
-                      value={tradeItemNotes[item.id] || ''}
-                      placeholder="—"
-                      onChange={e => setTradeItemNotes(prev => ({ ...prev, [item.id]: e.target.value }))}
-                      className="w-full text-[9px] text-[#0C1B3A]/40 bg-transparent border-b border-[#0C1B3A]/6 focus:border-[#C9A84C] outline-none py-0.5 placeholder:text-[#0C1B3A]/15"
-                    />
+                  {/* Line Total + Delete */}
+                  <div className="col-span-1 text-right flex items-center justify-end gap-2">
+                    <div>
+                      <p className="text-[15px] font-black font-mono text-[#0C1B3A]">
+                        {(item.targetUnitPrice * item.quantity).toFixed(2)}
+                      </p>
+                      <p className="text-[11px] text-[#0C1B3A]/30 font-mono">total</p>
+                    </div>
                     <button
                       onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
-                      className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors shrink-0"
+                      className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
                       title="Remove item"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-            {/* Footer totals */}
-            <div className="px-5 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
+            {/* Footer */}
+            <div className="px-6 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
               <button
                 onClick={() => setDraftItems(prev => [...prev, { id: `manual-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed', suggestedCategory: FurnitureCategory.OTHER }])}
-                className="text-[9px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-1.5"
+                className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-2"
               >
-                <Plus className="w-3 h-3" /> Add Item
+                <Plus className="w-4 h-4" /> Add Item
               </button>
               <div className="text-right">
-                <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total Supplier Cost</p>
-                <p className="text-base font-black font-mono text-[#0C1B3A]">
+                <p className="text-[10px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total Supplier Cost</p>
+                <p className="text-xl font-black font-mono text-[#0C1B3A]">
                   AED {draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0).toFixed(2)}
                 </p>
               </div>
+            </div>
+          </div>
+
+          {/* ── Terms & Notes ─────────────────────────────────────────── */}
+          <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+            <div className="px-6 py-3 bg-[#0C1B3A]/5 border-b border-[#0C1B3A]/6 flex items-center justify-between">
+              <div>
+                <h4 className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]">Terms &amp; Notes</h4>
+                <p className="text-[10px] text-[#0C1B3A]/40 mt-0.5">Payment terms · Lead time · Validity · Remarks from supplier quote</p>
+              </div>
+              {tradeTerms && (
+                <button onClick={() => setTradeTerms('')} className="text-[9px] text-[#0C1B3A]/25 hover:text-red-400 transition-colors uppercase tracking-widest font-bold">Clear</button>
+              )}
+            </div>
+            <div className="p-5">
+              <textarea
+                value={tradeTerms}
+                onChange={e => setTradeTerms(e.target.value)}
+                rows={tradeTerms ? Math.max(3, tradeTerms.split('\n').length + 1) : 3}
+                placeholder="AI-extracted payment terms, lead time, validity, warranty, notes will appear here automatically.&#10;You can also type or paste manually.&#10;&#10;Example:&#10;Payment: 30% TT advance, 70% before shipment&#10;Lead time: 45 days after deposit&#10;Validity: 30 days"
+                className="w-full text-[13px] text-[#0C1B3A]/70 bg-transparent outline-none resize-none leading-relaxed placeholder:text-[#0C1B3A]/20 placeholder:text-[12px]"
+              />
             </div>
           </div>
 
@@ -2938,7 +3001,7 @@ export default function App() {
           <div className="flex justify-end">
             <button
               onClick={() => setTradePhase('pricing')}
-              className="px-10 py-5 bg-[#0C1B3A] text-[#C9A84C] rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-[#0F2551] active:scale-95 transition-all border border-[#C9A84C]/30 flex items-center gap-3"
+              className="px-10 py-5 bg-[#0C1B3A] text-[#C9A84C] rounded-full text-[11px] font-black uppercase tracking-widest shadow-xl hover:bg-[#0F2551] active:scale-95 transition-all border border-[#C9A84C]/30 flex items-center gap-3"
             >
               Next: Set Selling Prices →
             </button>
