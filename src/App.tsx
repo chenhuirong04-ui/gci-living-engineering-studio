@@ -2029,6 +2029,10 @@ export default function App() {
                   return;
                 }
                 setValidationError('');
+                // Reset path selection so user picks quote type fresh
+                setQuoteType(null);
+                setQuoteMode(null);
+                setTradePhase(null);
                 setProjectInfoSubmitted(true);
               }}
               className="px-16 py-8 bg-brand-brown text-brand-ivory rounded-[36px] font-bold uppercase tracking-[0.3em] text-[11px] shadow-[0_25px_60px_-15px_rgba(62,39,35,0.3)] hover:bg-brand-brown/95 hover:-translate-y-1 active:scale-95 transition-all duration-500 flex items-center gap-6"
@@ -2084,7 +2088,40 @@ export default function App() {
 
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest flex-wrap">
+          <button onClick={() => setProjectInfoSubmitted(false)} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Project Info</button>
+          <span className="text-[#0C1B3A]/15">›</span>
+          <button
+            onClick={() => { setQuoteMode(null); setSelectedScenario(null); setQuoteType(null); setTradePhase(null); setActiveTab('items'); }}
+            className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors"
+          >Quote Type</button>
+          <span className="text-[#0C1B3A]/15">›</span>
+          <button onClick={() => setTradePhase('upload')} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+            {quoteType === 'boq' ? 'BOQ & AI Analysis' : 'Trade & Sourcing'}
+          </button>
+          <span className="text-[#0C1B3A]/15">›</span>
+          <span className="text-[#C9A84C]">Pricing Review</span>
+        </div>
+
         <StepIndicator current={4} />
+
+        {/* Quote Context */}
+        <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[20px] px-6 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[
+            { label: 'Customer / Project', value: quoteInfo.customerProjectName || '—' },
+            { label: 'Quote No', value: quoteInfo.quoteNumber || 'Auto' },
+            { label: 'Date', value: quoteInfo.date || '—' },
+            { label: 'Salesperson', value: quoteInfo.salesperson || '—' },
+            { label: 'Phone / WA', value: quoteInfo.phoneWhatsApp || '—' },
+            { label: 'Source', value: _businessIdParam ? `DEAL · ${_businessIdParam}` : 'Manual' },
+          ].map(f => (
+            <div key={f.label}>
+              <p className="text-[8px] font-black uppercase tracking-wider text-[#0C1B3A]/30 mb-0.5">{f.label}</p>
+              <p className="text-[11px] font-bold text-[#0C1B3A] truncate" title={f.value}>{f.value}</p>
+            </div>
+          ))}
+        </div>
 
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -2101,7 +2138,7 @@ export default function App() {
             onClick={() => setTradePhase('upload')}
             className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#0C1B3A] transition-colors"
           >
-            ← Back to Items
+            ← Back to Draft Items
           </button>
         </div>
 
@@ -2218,19 +2255,56 @@ export default function App() {
   };
 
   const renderPackageWorkspace = () => (
-    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+
+      {/* ── Breadcrumb nav ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest flex-wrap">
+        <button
+          onClick={() => setProjectInfoSubmitted(false)}
+          className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors"
+        >
+          Project Info
+        </button>
+        <span className="text-[#0C1B3A]/15">›</span>
+        <button
+          onClick={() => { setQuoteMode(null); setSelectedScenario(null); setQuoteType(null); setTradePhase(null); setActiveTab('items'); }}
+          className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors"
+        >
+          Quote Type
+        </button>
+        <span className="text-[#0C1B3A]/15">›</span>
+        <span className="text-[#C9A84C]">
+          {quoteType === 'trade' ? 'Trade & Sourcing' : quoteType === 'boq' ? 'BOQ & AI Analysis' : 'Project Package'}
+        </span>
+        <span className="text-[#0C1B3A]/15">›</span>
+        <span className="text-[#0C1B3A]/50">{activeTab === 'draft' ? (quoteType === 'trade' || quoteType === 'boq' ? 'GCI Quotation Draft' : 'Draft') : (quoteType === 'trade' || quoteType === 'boq' ? 'Supplier Cost Items' : 'Items')}</span>
+      </div>
+
+      {/* ── Quote Context (trade/boq paths only) ───────────────────────── */}
+      {(quoteType === 'trade' || quoteType === 'boq') && (
+        <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[20px] px-6 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[
+            { label: 'Customer / Project', value: quoteInfo.customerProjectName || '—' },
+            { label: 'Quote No', value: quoteInfo.quoteNumber || 'Auto' },
+            { label: 'Date', value: quoteInfo.date || '—' },
+            { label: 'Salesperson', value: quoteInfo.salesperson || '—' },
+            { label: 'Phone / WA', value: quoteInfo.phoneWhatsApp || '—' },
+            { label: 'Source', value: _businessIdParam ? `DEAL · ${_businessIdParam}` : 'Manual' },
+          ].map(f => (
+            <div key={f.label}>
+              <p className="text-[8px] font-black uppercase tracking-wider text-[#0C1B3A]/30 mb-0.5">{f.label}</p>
+              <p className="text-[11px] font-bold text-[#0C1B3A] truncate" title={f.value}>{f.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex justify-between items-center">
         <button
-          onClick={() => {
-            setQuoteMode(null);
-            setSelectedScenario(null);
-            setQuoteType(null);
-            setTradePhase(null);
-            setActiveTab('items');
-          }}
-          className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-brand-gold hover:text-brand-brown transition-all group"
+          onClick={() => { setQuoteMode(null); setSelectedScenario(null); setQuoteType(null); setTradePhase(null); setActiveTab('items'); }}
+          className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-all group"
         >
-          <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" /> 返回选择界面 BACK TO MENU
+          <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" /> ← Quote Type Selection
         </button>
         <div className="flex items-center gap-4">
           {/* Context badge — changes based on quote path */}
@@ -2490,7 +2564,9 @@ export default function App() {
           <div className="p-8 border-b border-brand-beige bg-brand-beige/5">
             <div className="flex items-center gap-3">
               <Cpu className="w-5 h-5 text-brand-gold" />
-              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-brand-brown">{t('Import Zone')}</h3>
+              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-brand-brown">
+                {(quoteType === 'trade' || quoteType === 'boq') ? 'Supplier Quote Import' : t('Import Zone')}
+              </h3>
             </div>
           </div>
           
@@ -2565,7 +2641,7 @@ export default function App() {
                 ) : (
                   <>
                     <Cpu className="w-4 h-4 text-brand-gold" />
-                    {t('Analyze Client List')}
+                    {(quoteType === 'trade' || quoteType === 'boq') ? 'Analyze Supplier Quote' : t('Analyze Client List')}
                   </>
                 )}
               </button>
@@ -2580,13 +2656,13 @@ export default function App() {
             onClick={() => setActiveTab('items')}
             className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'items' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
           >
-            {t('Project Package Items')}
+            {(quoteType === 'trade' || quoteType === 'boq') ? 'Supplier Cost Items' : t('Project Package Items')}
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('draft')}
             className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'draft' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
           >
-            {t('Project Package Draft')}
+            {(quoteType === 'trade' || quoteType === 'boq') ? 'GCI Quotation Draft' : t('Project Package Draft')}
             {draftItems.length > 0 && (
               <span className="absolute -top-1 -right-1 w-5 h-5 bg-brand-gold text-[10px] text-white flex items-center justify-center rounded-full border-2 border-brand-beige shadow-sm">
                 {draftItems.length}
@@ -2599,8 +2675,12 @@ export default function App() {
       {activeTab === 'items' ? (
         <>
           <div className="text-center space-y-4">
-            <h2 className="text-4xl font-serif italic text-brand-brown">项目整套清单 Project Package Items</h2>
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Consolidate multiple items into one engineering specification</p>
+            <h2 className="text-4xl font-serif italic text-brand-brown">
+              {(quoteType === 'trade' || quoteType === 'boq') ? 'Supplier Cost Items' : '项目整套清单 Project Package Items'}
+            </h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">
+              {(quoteType === 'trade' || quoteType === 'boq') ? 'Items extracted from supplier quote · pending price review' : 'Consolidate multiple items into one engineering specification'}
+            </p>
           </div>
 
           <div className="space-y-8">
@@ -2733,8 +2813,12 @@ export default function App() {
               </div>
               <div className="h-px w-12 bg-brand-gold/30" />
             </div>
-            <h2 className="text-4xl font-serif italic text-brand-brown">项目草稿清单 Project Package Draft</h2>
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold opacity-80">Classified items waiting for configuration push</p>
+            <h2 className="text-4xl font-serif italic text-brand-brown">
+              {(quoteType === 'trade' || quoteType === 'boq') ? 'GCI Quotation Draft' : '项目草稿清单 Project Package Draft'}
+            </h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold opacity-80">
+              {(quoteType === 'trade' || quoteType === 'boq') ? '⚠ AI-generated draft — confirm supplier costs before pricing' : 'Classified items waiting for configuration push'}
+            </p>
           </div>
 
           {draftItems.length === 0 ? (
