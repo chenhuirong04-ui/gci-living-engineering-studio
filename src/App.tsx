@@ -534,6 +534,62 @@ export default function App() {
     alert('报价已保存至历史记录 Saved to history');
   };
 
+  const sendToTrade = () => {
+    if (!quoteInfo.customerProjectName) {
+      alert('请先填写客户/项目名称 Please enter Customer / Project Name');
+      return;
+    }
+    const isPackage = quoteMode === 'package';
+
+    // Build pre-VAT item list for TRADE (TRADE auto-adds 5% VAT)
+    const tradeItems = isPackage
+      ? packageItems.map(pkg => ({
+          desc: `${pkg.category} × ${pkg.quantity}`,
+          qty: pkg.quantity,
+          // totalAmount includes VAT, so divide by 1+vatPercent to get pre-VAT unit price
+          unitPrice: Number((pkg.totalAmount / (1 + costOverrides.vatPercent / 100)).toFixed(2)),
+          lineTotal: Number(((pkg.totalAmount / (1 + costOverrides.vatPercent / 100)) * pkg.quantity).toFixed(2)),
+        }))
+      : [{
+          desc: `${selectedCategory} Project | ${quoteInfo.quoteNumber || 'Draft'}`,
+          qty: 1,
+          unitPrice: Number((costs.total - costs.vat).toFixed(2)),
+          lineTotal: Number((costs.total - costs.vat).toFixed(2)),
+        }];
+
+    const totalBeforeVat = isPackage
+      ? packageItems.reduce((acc, pkg) => acc + pkg.totalAmount / (1 + costOverrides.vatPercent / 100) * pkg.quantity, 0)
+      : costs.total - costs.vat;
+    const vatAmt = isPackage
+      ? packageItems.reduce((acc, pkg) => acc + pkg.totalAmount, 0) - totalBeforeVat
+      : costs.vat;
+    const totalAmt = isPackage
+      ? packageItems.reduce((acc, pkg) => acc + pkg.totalAmount * pkg.quantity, 0)
+      : costs.total;
+    const costAmt = isPackage ? 0 : Number((costs.material + costs.labor + costs.packaging + costs.transport + costs.installation).toFixed(2));
+    const profitAmt = isPackage ? 0 : Number(costs.margin.toFixed(2));
+
+    const payload = {
+      customerName: quoteInfo.customerProjectName,
+      projectName: quoteInfo.customerProjectName,
+      quoteNo: quoteInfo.quoteNumber || `GCI-DRAFT-${Date.now()}`,
+      quoteDate: quoteInfo.date,
+      currency: 'AED',
+      subtotal: Number(totalBeforeVat.toFixed(2)),
+      vatAmount: Number(vatAmt.toFixed(2)),
+      totalAmount: Number(totalAmt.toFixed(2)),
+      marginRate: costOverrides.marginPercent,
+      costAmount: costAmt,
+      profitAmount: profitAmt,
+      items: tradeItems,
+      sourceApp: 'gci-living-engineering-studio',
+      piType: 'PROJECT',
+    };
+
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
+  };
+
   const generatePDF = () => {
     const doc = new jsPDF();
     const brandGold: [number, number, number] = [212, 175, 55]; // #D4AF37
@@ -3029,6 +3085,9 @@ export default function App() {
              </button>
              <button onClick={() => alert(t('Quotation sent message'))} className="flex-1 p-6 rounded-[28px] bg-brand-brown text-brand-ivory flex justify-center items-center gap-4 font-bold uppercase tracking-widest text-xs shadow-xl shadow-brand-brown/20 hover:bg-brand-brown/90 transition-all active:scale-95 group">
                <Download className="w-5 h-5 text-brand-gold group-hover:translate-y-1 transition-transform" /> {t('Sync to CRM')}
+             </button>
+             <button onClick={sendToTrade} className="flex-1 p-6 rounded-[28px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-4 font-bold uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 group border border-[#C9A84C]/30">
+               <ExternalLink className="w-5 h-5 text-[#C9A84C] group-hover:translate-x-1 transition-transform" /> Send to TRADE
              </button>
              {/* Print Only View (English) */}
             <div id="quotation-print" className="hidden print:block p-10 bg-white text-black font-sans">
