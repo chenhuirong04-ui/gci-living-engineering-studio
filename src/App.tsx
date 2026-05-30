@@ -797,6 +797,156 @@ export default function App() {
     doc.save(`GCI-Quotation-${quoteInfo.quoteNumber || 'Draft'}.pdf`);
   };
 
+  // ── Trade & Sourcing PDF — customer-facing quote with selling prices + terms ──
+  const generateTradePDF = (
+    items: typeof draftItems,
+    grandTotal: number,
+    totalSelling: number,
+    totalVAT: number,
+    totalSupplierCost: number,
+    totalProfit: number,
+    overallMargin: number
+  ) => {
+    const doc = new jsPDF();
+    const navy: [number, number, number] = [12, 27, 58];
+    const gold: [number, number, number] = [201, 168, 76];
+    const w = 210;
+    const margin = 15;
+    let y = 20;
+
+    // Header bar
+    doc.setFillColor(...navy);
+    doc.rect(0, 0, w, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GLOBALCARE INFO GENERAL TRADING FZCO', margin, 12);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(201, 168, 76);
+    doc.text('TEL: +971585566809  |  EMAIL: CHRIS@GLOBALCAREINFO.COM  |  DUBAI, UAE', margin, 20);
+    y = 38;
+
+    // Doc title
+    doc.setFillColor(...gold);
+    doc.rect(margin, y, w - margin * 2, 8, 'F');
+    doc.setTextColor(12, 27, 58);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PROFORMA INVOICE / TRADE QUOTATION', w / 2, y + 5.5, { align: 'center' });
+    y += 14;
+
+    // Quote info table
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(50, 50, 50);
+    const leftCol = [
+      ['Customer / Project:', quoteInfo.customerProjectName || '—'],
+      ['Quote No:', quoteInfo.quoteNumber || 'Draft'],
+      ['Salesperson:', quoteInfo.salesperson || '—'],
+    ];
+    const rightCol = [
+      ['Date:', quoteInfo.date || new Date().toISOString().split('T')[0]],
+      ['Currency:', 'AED'],
+      ['Source:', _businessIdParam ? `DEAL · ${_businessIdParam}` : 'Manual'],
+    ];
+    leftCol.forEach(([label, val], i) => {
+      doc.setFont('helvetica', 'bold'); doc.text(label, margin, y + i * 6);
+      doc.setFont('helvetica', 'normal'); doc.text(String(val), margin + 40, y + i * 6);
+    });
+    rightCol.forEach(([label, val], i) => {
+      doc.setFont('helvetica', 'bold'); doc.text(label, 120, y + i * 6);
+      doc.setFont('helvetica', 'normal'); doc.text(String(val), 145, y + i * 6);
+    });
+    y += 24;
+
+    // Items table
+    const colWidths = [75, 20, 18, 28, 28];
+    const colX = [margin, margin+75, margin+95, margin+113, margin+141];
+    const headers = ['Description', 'Qty', 'Unit', 'Unit Price', 'Total (AED)'];
+
+    doc.setFillColor(...navy);
+    doc.rect(margin, y, w - margin * 2, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    headers.forEach((h, i) => doc.text(h, colX[i] + (i >= 3 ? colWidths[i] - 2 : 1), y + 5, { align: i >= 3 ? 'right' : 'left' }));
+    y += 9;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 30, 30);
+    items.forEach((item) => {
+      if (y > 260) { doc.addPage(); y = 20; }
+      const sp = sellingPrices[item.id] || 0;
+      const lineTot = sp * item.quantity;
+      doc.setFontSize(8.5);
+      const nameLines = doc.splitTextToSize(item.originalName + (item.originalSpec ? `\n${item.originalSpec}` : ''), colWidths[0] - 2);
+      doc.text(nameLines, colX[0] + 1, y + 4);
+      doc.text(String(item.quantity), colX[1] + colWidths[1] - 2, y + 4, { align: 'right' });
+      doc.text(item.unit, colX[2] + 1, y + 4);
+      doc.text(sp.toFixed(2), colX[3] + colWidths[3] - 2, y + 4, { align: 'right' });
+      doc.text(lineTot.toFixed(2), colX[4] + colWidths[4] - 2, y + 4, { align: 'right' });
+      const rowH = Math.max(7, nameLines.length * 4.5 + 3);
+      doc.setDrawColor(220, 220, 220);
+      doc.line(margin, y + rowH, w - margin, y + rowH);
+      y += rowH;
+    });
+    y += 4;
+
+    // Totals
+    const totals = [
+      ['Subtotal (excl. VAT):', `AED ${totalSelling.toFixed(2)}`],
+      ['VAT (5%):', `AED ${totalVAT.toFixed(2)}`],
+    ];
+    totals.forEach(([label, val]) => {
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+      doc.text(label, 130, y); doc.text(val, w - margin, y, { align: 'right' });
+      y += 6;
+    });
+    doc.setFillColor(...navy);
+    doc.rect(125, y, w - margin - 125, 8, 'F');
+    doc.setTextColor(201, 168, 76);
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+    doc.text('GRAND TOTAL:', 127, y + 5.5);
+    doc.text(`AED ${grandTotal.toFixed(2)}`, w - margin, y + 5.5, { align: 'right' });
+    y += 14;
+
+    // Internal summary (light grey box)
+    doc.setFillColor(245, 245, 248);
+    doc.rect(margin, y, w - margin * 2, 10, 'F');
+    doc.setTextColor(120, 120, 120);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+    doc.text(`Supplier Cost: AED ${totalSupplierCost.toFixed(2)}  |  Profit: AED ${totalProfit.toFixed(2)}  |  Margin: ${overallMargin.toFixed(1)}%`, w / 2, y + 6.5, { align: 'center' });
+    y += 16;
+
+    // Terms & Notes
+    if (tradeTerms) {
+      if (y > 240) { doc.addPage(); y = 20; }
+      doc.setFillColor(...navy);
+      doc.rect(margin, y, w - margin * 2, 7, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+      doc.text('TERMS & NOTES', margin + 2, y + 5);
+      y += 10;
+      doc.setTextColor(40, 40, 40);
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+      const termLines = doc.splitTextToSize(tradeTerms, w - margin * 2 - 4);
+      termLines.forEach((line: string) => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(line, margin + 2, y);
+        y += 5;
+      });
+      y += 4;
+    }
+
+    // Footer
+    doc.setTextColor(160, 160, 160);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+    doc.text('This is a system-generated document from GCI Quotation Center.', w / 2, 287, { align: 'center' });
+
+    doc.save(`GCI-Trade-Quote-${quoteInfo.quoteNumber || quoteInfo.customerProjectName || 'Draft'}.pdf`);
+  };
+
   const t = (key: string) => {
     return translations.bilingual[key] || translations.en[key] || key;
   };
@@ -2130,6 +2280,7 @@ export default function App() {
         })),
         sourceApp: 'gci-living-engineering-studio',
         piType: 'PROJECT',
+        notes: tradeTerms || undefined,
       };
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
       window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
@@ -2411,10 +2562,18 @@ export default function App() {
               </div>
             </div>
 
+            {/* Terms & Notes in GCI Draft */}
+            {tradeTerms && (
+              <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[16px] px-6 py-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 mb-2">Terms &amp; Notes</p>
+                <p className="text-[13px] text-[#0C1B3A]/70 whitespace-pre-line leading-relaxed">{tradeTerms}</p>
+              </div>
+            )}
+
             {/* Final action buttons */}
             <div className="flex flex-col sm:flex-row gap-4 pt-2">
               <button
-                onClick={generatePDF}
+                onClick={() => generateTradePDF(confirmed, grandTotal, totalSelling, totalVAT, totalSupplierCost, totalProfit, overallMargin)}
                 className="flex-1 p-5 rounded-[24px] bg-white border-2 border-[#0C1B3A]/15 text-[#0C1B3A] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs hover:border-[#C9A84C] transition-all active:scale-95"
               >
                 <Download className="w-4 h-4" /> Download PDF
