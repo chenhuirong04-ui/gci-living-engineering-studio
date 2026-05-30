@@ -1,8 +1,8 @@
 import React from 'react';
-import { Ruler, Package, Upload } from 'lucide-react';
+import { Ruler, ShoppingCart, FileSearch } from 'lucide-react';
 import { StepIndicator } from './StepIndicator';
 
-export type QuoteType = 'custom' | 'package' | 'upload';
+export type QuoteType = 'custom' | 'trade' | 'boq';
 
 interface TypeCard {
   type: QuoteType;
@@ -13,6 +13,7 @@ interface TypeCard {
   description: string;
   descriptionZh: string;
   examples: string[];
+  flow: string[];
 }
 
 const CARDS: TypeCard[] = [
@@ -22,29 +23,32 @@ const CARDS: TypeCard[] = [
     title: 'Custom Item Quote',
     titleZh: '单品定制报价',
     tag: 'Path 1',
-    description: 'Quote a single custom-made furniture item.',
-    descriptionZh: '为单一定制产品生成工程报价',
-    examples: ['Bed / 床', 'Sofa / 沙发', 'Wardrobe / 衣柜', 'Cabinet / 储物柜', 'Table / 桌子'],
+    description: 'Quote a single custom-made furniture item with full BOM & engineering calculation.',
+    descriptionZh: '为单一定制产品生成工程报价，含BOM材料计算',
+    examples: ['Sofa / 沙发', 'Bed / 床', 'Wardrobe / 衣柜', 'Table / 桌椅', 'TV Unit / 电视柜'],
+    flow: ['Configure item', 'BOM auto-calc', 'Set margin', 'PDF + Send to TRADE'],
   },
   {
-    type: 'package',
-    icon: Package,
-    title: 'Project Package Quote',
-    titleZh: '整套项目报价',
+    type: 'trade',
+    icon: ShoppingCart,
+    title: 'Trade & Sourcing Quote',
+    titleZh: '贸易采购报价',
     tag: 'Path 2',
-    description: 'Quote a full furniture set for a project environment.',
-    descriptionZh: '按场景配置整套家具，生成项目包报价',
-    examples: ['Labour Camp / 营地', 'Hotel / 酒店', 'Villa / 别墅', 'Apartment / 公寓', 'Office / 办公室'],
+    description: 'Upload supplier costs, input your selling price, system calculates profit & VAT automatically.',
+    descriptionZh: '上传供应商报价，手工定价，系统自动计算利润',
+    examples: ['Furniture Projects / 家具项目', 'Tissue / 纸巾', 'Coffee / 咖啡', 'Sanitary / 卫生用品', 'Building Materials / 建材', 'AI Devices / AI设备'],
+    flow: ['Upload supplier quote', 'AI cost recognition', 'Input selling price', 'PDF + Send to TRADE'],
   },
   {
-    type: 'upload',
-    icon: Upload,
-    title: 'Supplier Quote Upload',
-    titleZh: '供应商报价上传',
+    type: 'boq',
+    icon: FileSearch,
+    title: 'BOQ & AI Analysis',
+    titleZh: 'BOQ / 图纸 AI 分析',
     tag: 'Path 3',
-    description: 'Upload supplier cost data — AI parses and builds a draft for you to review and mark up.',
-    descriptionZh: '上传供应商报价，AI 自动解析生成草稿，加利润后生成客户报价',
-    examples: ['Excel / CSV', 'PDF', 'Image / 图片', 'Text paste / 手工文本'],
+    description: 'Upload BOQ, drawings or requirement PDFs. AI extracts item list — then route to Trade & Sourcing for pricing.',
+    descriptionZh: '上传BOQ/图纸/需求文件，AI提取清单，转入Trade报价流程',
+    examples: ['BOQ / 工程量清单', 'Drawings / 图纸', 'Project PDF', 'Requirement List / 需求清单'],
+    flow: ['Upload BOQ / drawing', 'AI item extraction', 'Review draft list', '→ Trade & Sourcing pricing'],
   },
 ];
 
@@ -65,7 +69,7 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
       </p>
       <h2 className="text-3xl font-serif italic text-[#0C1B3A]">Choose Quote Type</h2>
       <p className="text-xs text-[#0C1B3A]/50 font-medium">
-        Select the path that matches your current task
+        Select the path that matches your current task · 选择对应业务路径
       </p>
     </div>
 
@@ -79,7 +83,7 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
             onClick={() => onSelect(card.type)}
             className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-400 flex flex-col gap-5"
           >
-            {/* Tag */}
+            {/* Tag + Icon */}
             <div className="flex items-center justify-between">
               <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">
                 {card.tag}
@@ -104,18 +108,31 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
               <span className="text-[#0C1B3A]/35">{card.descriptionZh}</span>
             </p>
 
-            {/* Examples */}
-            <div className="flex flex-wrap gap-1.5 mt-auto">
-              {card.examples.map(ex => (
-                <span key={ex} className="text-[9px] font-bold text-[#0C1B3A]/40 bg-[#0C1B3A]/4 px-2 py-0.5 rounded-full">
-                  {ex}
-                </span>
+            {/* Flow steps */}
+            <div className="space-y-1 mt-1">
+              {card.flow.map((step, i) => (
+                <div key={i} className="flex items-center gap-2 text-[9px] text-[#0C1B3A]/40">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#0C1B3A]/8 flex items-center justify-center font-black text-[7px] shrink-0">{i + 1}</span>
+                  {step}
+                </div>
               ))}
             </div>
 
-            {/* CTA arrow */}
+            {/* Examples */}
+            <div className="flex flex-wrap gap-1.5">
+              {card.examples.slice(0, 4).map(ex => (
+                <span key={ex} className="text-[8px] font-bold text-[#0C1B3A]/40 bg-[#0C1B3A]/4 px-2 py-0.5 rounded-full">
+                  {ex}
+                </span>
+              ))}
+              {card.examples.length > 4 && (
+                <span className="text-[8px] font-bold text-[#0C1B3A]/30 px-1">+{card.examples.length - 4}</span>
+              )}
+            </div>
+
+            {/* CTA */}
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">
-              Select this path →
+              Select → 进入
             </div>
           </button>
         );

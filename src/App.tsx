@@ -52,7 +52,9 @@ import {
   Cpu,
   Upload,
   Clipboard,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ShoppingCart,
+  FileSearch
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as XLSX from 'xlsx';
@@ -214,6 +216,8 @@ export default function App() {
   const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(!!_prefillName);
   const [quoteMode, setQuoteMode] = useState<'single' | 'package' | null>(null);
   const [quoteType, setQuoteType] = useState<QuoteType | null>(null);
+  const [tradePhase, setTradePhase] = useState<'upload' | 'pricing' | null>(null);
+  const [sellingPrices, setSellingPrices] = useState<Record<string, number>>({});
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -434,6 +438,8 @@ export default function App() {
     setProjectInfoSubmitted(false);
     setQuoteMode(null);
     setQuoteType(null);
+    setTradePhase(null);
+    setSellingPrices({});
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -541,14 +547,19 @@ export default function App() {
   // Handle 3-path type selection (Step 2)
   const handleTypeSelect = (type: QuoteType) => {
     setQuoteType(type);
-    if (type === 'package') {
-      setQuoteMode('package');
-      setActiveTab('items');
-    } else if (type === 'upload') {
+    if (type === 'trade') {
+      // Trade & Sourcing: go directly to upload/AI parsing tab
       setQuoteMode('package');
       setActiveTab('draft');
+      setTradePhase('upload');
+    } else if (type === 'boq') {
+      // BOQ & AI Analysis: same upload tab, different context label
+      setQuoteMode('package');
+      setActiveTab('draft');
+      setTradePhase('upload');
     } else {
       setQuoteMode(null); // 'custom' — let category selection drive quoteMode
+      setTradePhase(null);
     }
   };
 
@@ -2033,6 +2044,179 @@ export default function App() {
     </div>
   );
 
+  // ── Trade & Sourcing: Manual Pricing Review ─────────────────────────────
+  const renderTradeQuoteReview = () => {
+    const confirmed = draftItems.filter(it => it.status === 'Confirmed');
+    const totalSupplierCost = confirmed.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
+    const totalSelling = confirmed.reduce((s, it) => s + (sellingPrices[it.id] || 0) * it.quantity, 0);
+    const totalProfit = totalSelling - totalSupplierCost;
+    const overallMargin = totalSupplierCost > 0 ? (totalProfit / totalSupplierCost) * 100 : 0;
+    const totalVAT = totalSelling * 0.05;
+    const grandTotal = totalSelling + totalVAT;
+
+    const handleSendTradeToTrade = () => {
+      if (!quoteInfo.customerProjectName) { alert('请填写客户/项目名称'); return; }
+      if (totalSelling <= 0) { alert('请先输入销售价格'); return; }
+      const payload = {
+        customerName: quoteInfo.customerProjectName,
+        projectName: quoteInfo.customerProjectName,
+        quoteNo: quoteInfo.quoteNumber || `GCI-TRADE-${Date.now()}`,
+        quoteDate: quoteInfo.date,
+        currency: 'AED',
+        subtotal: Number(totalSelling.toFixed(2)),
+        vatAmount: Number(totalVAT.toFixed(2)),
+        totalAmount: Number(grandTotal.toFixed(2)),
+        marginRate: Number(overallMargin.toFixed(1)),
+        costAmount: Number(totalSupplierCost.toFixed(2)),
+        profitAmount: Number(totalProfit.toFixed(2)),
+        items: confirmed.map(it => ({
+          desc: `${it.originalName}${it.originalSpec ? ` (${it.originalSpec})` : ''}`,
+          qty: it.quantity,
+          unitPrice: Number((sellingPrices[it.id] || 0).toFixed(2)),
+          lineTotal: Number(((sellingPrices[it.id] || 0) * it.quantity).toFixed(2)),
+        })),
+        sourceApp: 'gci-living-engineering-studio',
+        piType: 'PROJECT',
+      };
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
+    };
+
+    return (
+      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+        <StepIndicator current={4} />
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">
+                {quoteType === 'boq' ? 'BOQ → Trade Pricing' : 'Trade & Sourcing'}
+              </span>
+            </div>
+            <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Review Cost & Set Selling Price</h2>
+            <p className="text-[10px] text-[#0C1B3A]/50 mt-1">输入销售价格 · 系统自动计算利润和VAT</p>
+          </div>
+          <button
+            onClick={() => setTradePhase('upload')}
+            className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#0C1B3A] transition-colors"
+          >
+            ← Back to Items
+          </button>
+        </div>
+
+        {/* Pricing Table */}
+        <div className="bg-white rounded-[32px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-2 px-6 py-3 bg-[#0C1B3A] text-white text-[9px] font-black uppercase tracking-wider">
+            <div className="col-span-3">Item</div>
+            <div className="col-span-1 text-right">Qty</div>
+            <div className="col-span-2 text-right">Supplier Cost</div>
+            <div className="col-span-2 text-right">Selling Price ✎</div>
+            <div className="col-span-1 text-right">Profit</div>
+            <div className="col-span-1 text-right">Margin%</div>
+            <div className="col-span-2 text-right">Line Total (incl VAT)</div>
+          </div>
+
+          {/* Items */}
+          <div className="divide-y divide-[#0C1B3A]/5">
+            {confirmed.map(item => {
+              const supplierTotal = item.targetUnitPrice * item.quantity;
+              const sellPrice = sellingPrices[item.id] || 0;
+              const lineSellingTotal = sellPrice * item.quantity;
+              const lineProfit = lineSellingTotal - supplierTotal;
+              const lineMargin = supplierTotal > 0 ? (lineProfit / supplierTotal) * 100 : 0;
+              const lineVAT = lineSellingTotal * 0.05;
+              const lineTotal = lineSellingTotal + lineVAT;
+              const isProfit = lineProfit > 0;
+              return (
+                <div key={item.id} className="grid grid-cols-12 gap-2 px-6 py-4 items-center hover:bg-[#0C1B3A]/2 transition-colors">
+                  <div className="col-span-3">
+                    <p className="text-[11px] font-bold text-[#0C1B3A] truncate">{item.originalName}</p>
+                    {item.originalSpec && <p className="text-[9px] text-[#0C1B3A]/40 truncate">{item.originalSpec}</p>}
+                    <span className="text-[8px] font-bold text-[#0C1B3A]/30 uppercase">{item.unit}</span>
+                  </div>
+                  <div className="col-span-1 text-right text-[11px] font-bold text-[#0C1B3A]">{item.quantity}</div>
+                  <div className="col-span-2 text-right">
+                    <p className="text-[11px] font-mono text-[#0C1B3A]/60">{supplierTotal.toFixed(2)}</p>
+                    <p className="text-[9px] text-[#0C1B3A]/30">@{item.targetUnitPrice.toFixed(2)}</p>
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={sellPrice || ''}
+                      placeholder="0.00"
+                      onChange={e => setSellingPrices(prev => ({ ...prev, [item.id]: Number(e.target.value) || 0 }))}
+                      className="w-full text-right bg-[#C9A84C]/8 border border-[#C9A84C]/30 rounded-lg px-2 py-1.5 text-[11px] font-black font-mono text-[#0C1B3A] outline-none focus:border-[#C9A84C] focus:bg-[#C9A84C]/12 transition-all"
+                    />
+                  </div>
+                  <div className={`col-span-1 text-right text-[10px] font-black font-mono ${isProfit ? 'text-green-600' : sellPrice > 0 ? 'text-red-500' : 'text-[#0C1B3A]/20'}`}>
+                    {sellPrice > 0 ? (lineProfit >= 0 ? '+' : '') + lineProfit.toFixed(0) : '—'}
+                  </div>
+                  <div className={`col-span-1 text-right text-[10px] font-black ${isProfit ? 'text-green-600' : sellPrice > 0 ? 'text-red-500' : 'text-[#0C1B3A]/20'}`}>
+                    {sellPrice > 0 ? lineMargin.toFixed(1) + '%' : '—'}
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <p className={`text-[11px] font-black font-mono ${sellPrice > 0 ? 'text-[#0C1B3A]' : 'text-[#0C1B3A]/20'}`}>
+                      {sellPrice > 0 ? lineTotal.toFixed(2) : '—'}
+                    </p>
+                    {sellPrice > 0 && <p className="text-[8px] text-[#0C1B3A]/30">VAT {lineVAT.toFixed(2)}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Grand Total Footer */}
+          <div className="px-6 py-5 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/10">
+            <div className="grid grid-cols-3 gap-8 text-center">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Total Supplier Cost</p>
+                <p className="text-xl font-black font-mono text-[#0C1B3A] mt-1">AED {totalSupplierCost.toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Total Profit · Margin</p>
+                <p className={`text-xl font-black font-mono mt-1 ${totalProfit > 0 ? 'text-green-600' : totalSelling > 0 ? 'text-red-500' : 'text-[#0C1B3A]/30'}`}>
+                  {totalSelling > 0 ? `AED ${totalProfit.toFixed(2)} · ${overallMargin.toFixed(1)}%` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Grand Total (incl 5% VAT)</p>
+                <p className="text-xl font-black font-mono text-[#C9A84C] mt-1">
+                  {totalSelling > 0 ? `AED ${grandTotal.toFixed(2)}` : '—'}
+                </p>
+                {totalSelling > 0 && <p className="text-[8px] text-[#0C1B3A]/30 mt-0.5">VAT {totalVAT.toFixed(2)}</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Note */}
+        <p className="text-center text-[9px] text-[#0C1B3A]/30 font-bold uppercase tracking-widest">
+          ⚠ Selling prices are manual · System calculates profit &amp; VAT only · 系统仅做计算辅助，定价由人决定
+        </p>
+
+        {/* Step 5 Final Actions */}
+        <div className="flex items-center gap-2 justify-center">
+          <div className="h-px flex-1 bg-[#0C1B3A]/8" />
+          <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] px-3">Step 5 · Final Actions</span>
+          <div className="h-px flex-1 bg-[#0C1B3A]/8" />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4 max-w-2xl mx-auto w-full">
+          <button
+            onClick={handleSendTradeToTrade}
+            disabled={totalSelling <= 0}
+            className="flex-1 p-5 rounded-[24px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ExternalLink className="w-4 h-4" /> Send to TRADE
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderPackageWorkspace = () => (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
       <div className="flex justify-between items-center">
@@ -2041,6 +2225,7 @@ export default function App() {
             setQuoteMode(null);
             setSelectedScenario(null);
             setQuoteType(null);
+            setTradePhase(null);
             setActiveTab('items');
           }}
           className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-brand-gold hover:text-brand-brown transition-all group"
@@ -2048,10 +2233,23 @@ export default function App() {
           <ArrowLeft className="w-3 h-3 group-hover:-translate-x-1 transition-transform" /> 返回选择界面 BACK TO MENU
         </button>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 px-4 py-3 bg-brand-gold/10 rounded-full">
-            <Package className="w-4 h-4 text-brand-gold" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-brand-brown">{selectedScenario ? t(selectedScenario) : 'Project'} Package Mode</span>
-          </div>
+          {/* Context badge — changes based on quote path */}
+          {quoteType === 'trade' ? (
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#0C1B3A]/8 rounded-full border border-[#0C1B3A]/12">
+              <ShoppingCart className="w-4 h-4 text-[#C9A84C]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">Trade &amp; Sourcing Quote</span>
+            </div>
+          ) : quoteType === 'boq' ? (
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#0C1B3A]/8 rounded-full border border-[#0C1B3A]/12">
+              <FileSearch className="w-4 h-4 text-[#C9A84C]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">BOQ &amp; AI Analysis</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 px-4 py-3 bg-brand-gold/10 rounded-full">
+              <Package className="w-4 h-4 text-brand-gold" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-brand-brown">{selectedScenario ? t(selectedScenario) : 'Project'} Package Mode</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2709,7 +2907,24 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                   <button 
+                  {/* Trade & Sourcing / BOQ path: Proceed to manual pricing */}
+                  {(quoteType === 'trade' || quoteType === 'boq') && (
+                    <button
+                      onClick={() => {
+                        const confirmed = draftItems.filter(it => it.status === 'Confirmed');
+                        if (confirmed.length === 0) {
+                          alert('请先确认至少一个品项 Please confirm at least one item first');
+                          return;
+                        }
+                        setTradePhase('pricing');
+                      }}
+                      className="px-10 py-5 bg-[#0C1B3A] text-[#C9A84C] rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-[#0F2551] active:scale-95 transition-all border border-[#C9A84C]/30 flex items-center gap-3"
+                    >
+                      Proceed to Pricing → 进入定价
+                    </button>
+                  )}
+
+                   <button
                     onClick={() => {
                         const confirmed = draftItems.filter(it => it.status === 'Confirmed');
                         if (confirmed.length === 0) {
@@ -2765,8 +2980,8 @@ export default function App() {
       </div>
 
       <div className="space-y-16">
-        {/* Section 1: Individual Items — only shown for 'custom' path (or no path set) */}
-        {quoteType !== 'package' && (
+        {/* Section 1: Individual Items — only shown for 'custom' path */}
+        {quoteType !== 'trade' && quoteType !== 'boq' && (
         <section className="space-y-8">
           <div className="text-center space-y-3">
             <h2 className="text-3xl font-serif italic text-brand-brown">{t('Individual Item Quote')}</h2>
@@ -2797,8 +3012,8 @@ export default function App() {
         </section>
         )} {/* end quoteType !== 'package' */}
 
-        {/* Section 2: Project Packages — only shown for 'package' path (or no path set) */}
-        {quoteType !== 'custom' && (
+        {/* Section 2: Scenarios — hidden, trade/boq go direct to workspace */}
+        {false && (
         <section className="space-y-8 pt-12 border-t border-brand-beige/50">
           <div className="text-center space-y-3">
             <h2 className="text-3xl font-serif italic text-brand-brown">{t('Project Package Quote')}</h2>
@@ -4411,6 +4626,8 @@ export default function App() {
                 onBack={() => setProjectInfoSubmitted(false)}
                 projectName={quoteInfo.customerProjectName}
               />
+            ) : (quoteType === 'trade' || quoteType === 'boq') && tradePhase === 'pricing' ? (
+              renderTradeQuoteReview()
             ) : quoteMode === 'package' && !selectedCategory ? (
               renderPackageWorkspace()
             ) : !selectedCategory ? (
