@@ -218,6 +218,10 @@ export default function App() {
   const [quoteType, setQuoteType] = useState<QuoteType | null>(null);
   const [tradePhase, setTradePhase] = useState<'upload' | 'pricing' | null>(null);
   const [sellingPrices, setSellingPrices] = useState<Record<string, number>>({});
+  const [markupPercents, setMarkupPercents] = useState<Record<string, number>>({});
+  const [tradeItemNotes, setTradeItemNotes] = useState<Record<string, string>>({});
+  const [tradeItemCurrencies, setTradeItemCurrencies] = useState<Record<string, string>>({});
+  const [quoteGenerated, setQuoteGenerated] = useState(false);
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -440,6 +444,10 @@ export default function App() {
     setQuoteType(null);
     setTradePhase(null);
     setSellingPrices({});
+    setMarkupPercents({});
+    setTradeItemNotes({});
+    setTradeItemCurrencies({});
+    setQuoteGenerated(false);
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -2150,56 +2158,81 @@ export default function App() {
             <div className="col-span-1 text-right">Qty</div>
             <div className="col-span-2 text-right">Supplier Cost</div>
             <div className="col-span-2 text-right">Selling Price ✎</div>
+            <div className="col-span-1 text-right">Markup%</div>
             <div className="col-span-1 text-right">Profit</div>
             <div className="col-span-1 text-right">Margin%</div>
-            <div className="col-span-2 text-right">Line Total (incl VAT)</div>
+            <div className="col-span-1 text-right">Total+VAT</div>
           </div>
 
           {/* Items */}
           <div className="divide-y divide-[#0C1B3A]/5">
             {confirmed.map(item => {
-              const supplierTotal = item.targetUnitPrice * item.quantity;
+              const supplierUnit = item.targetUnitPrice;
+              const supplierTotal = supplierUnit * item.quantity;
               const sellPrice = sellingPrices[item.id] || 0;
+              const markupPct = markupPercents[item.id] || 0;
               const lineSellingTotal = sellPrice * item.quantity;
               const lineProfit = lineSellingTotal - supplierTotal;
               const lineMargin = supplierTotal > 0 ? (lineProfit / supplierTotal) * 100 : 0;
               const lineVAT = lineSellingTotal * 0.05;
               const lineTotal = lineSellingTotal + lineVAT;
               const isProfit = lineProfit > 0;
+              const handleSellChange = (val: number) => {
+                setSellingPrices(prev => ({ ...prev, [item.id]: val }));
+                if (supplierUnit > 0 && val > 0)
+                  setMarkupPercents(prev => ({ ...prev, [item.id]: Number(((val / supplierUnit - 1) * 100).toFixed(1)) }));
+              };
+              const handleMarkupChange = (pct: number) => {
+                setMarkupPercents(prev => ({ ...prev, [item.id]: pct }));
+                if (supplierUnit > 0)
+                  setSellingPrices(prev => ({ ...prev, [item.id]: Number((supplierUnit * (1 + pct / 100)).toFixed(2)) }));
+              };
               return (
                 <div key={item.id} className="grid grid-cols-12 gap-2 px-6 py-4 items-center hover:bg-[#0C1B3A]/2 transition-colors">
                   <div className="col-span-3">
                     <p className="text-[11px] font-bold text-[#0C1B3A] truncate">{item.originalName}</p>
                     {item.originalSpec && <p className="text-[9px] text-[#0C1B3A]/40 truncate">{item.originalSpec}</p>}
-                    <span className="text-[8px] font-bold text-[#0C1B3A]/30 uppercase">{item.unit}</span>
+                    <span className="text-[8px] font-bold text-[#0C1B3A]/30 uppercase">{tradeItemCurrencies[item.id] || 'AED'} · {item.unit}</span>
                   </div>
                   <div className="col-span-1 text-right text-[11px] font-bold text-[#0C1B3A]">{item.quantity}</div>
                   <div className="col-span-2 text-right">
                     <p className="text-[11px] font-mono text-[#0C1B3A]/60">{supplierTotal.toFixed(2)}</p>
-                    <p className="text-[9px] text-[#0C1B3A]/30">@{item.targetUnitPrice.toFixed(2)}</p>
+                    <p className="text-[9px] text-[#0C1B3A]/30">@{supplierUnit.toFixed(2)}</p>
                   </div>
-                  <div className="col-span-2 text-right">
+                  {/* Selling Price */}
+                  <div className="col-span-2">
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="number" min="0" step="0.01"
                       value={sellPrice || ''}
                       placeholder="0.00"
-                      onChange={e => setSellingPrices(prev => ({ ...prev, [item.id]: Number(e.target.value) || 0 }))}
+                      onChange={e => handleSellChange(Number(e.target.value) || 0)}
                       className="w-full text-right bg-[#C9A84C]/8 border border-[#C9A84C]/30 rounded-lg px-2 py-1.5 text-[11px] font-black font-mono text-[#0C1B3A] outline-none focus:border-[#C9A84C] focus:bg-[#C9A84C]/12 transition-all"
                     />
                   </div>
+                  {/* Markup% */}
+                  <div className="col-span-1">
+                    <input
+                      type="number" step="0.1"
+                      value={markupPct || ''}
+                      placeholder="0%"
+                      onChange={e => handleMarkupChange(Number(e.target.value) || 0)}
+                      className="w-full text-right bg-[#0C1B3A]/4 border border-[#0C1B3A]/15 rounded-lg px-2 py-1.5 text-[10px] font-black font-mono text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-all"
+                    />
+                  </div>
+                  {/* Profit */}
                   <div className={`col-span-1 text-right text-[10px] font-black font-mono ${isProfit ? 'text-green-600' : sellPrice > 0 ? 'text-red-500' : 'text-[#0C1B3A]/20'}`}>
                     {sellPrice > 0 ? (lineProfit >= 0 ? '+' : '') + lineProfit.toFixed(0) : '—'}
                   </div>
+                  {/* Margin% */}
                   <div className={`col-span-1 text-right text-[10px] font-black ${isProfit ? 'text-green-600' : sellPrice > 0 ? 'text-red-500' : 'text-[#0C1B3A]/20'}`}>
                     {sellPrice > 0 ? lineMargin.toFixed(1) + '%' : '—'}
                   </div>
-                  <div className="col-span-2 text-right">
-                    <p className={`text-[11px] font-black font-mono ${sellPrice > 0 ? 'text-[#0C1B3A]' : 'text-[#0C1B3A]/20'}`}>
+                  {/* Line Total */}
+                  <div className="col-span-1 text-right">
+                    <p className={`text-[10px] font-black font-mono ${sellPrice > 0 ? 'text-[#0C1B3A]' : 'text-[#0C1B3A]/20'}`}>
                       {sellPrice > 0 ? lineTotal.toFixed(2) : '—'}
                     </p>
-                    {sellPrice > 0 && <p className="text-[8px] text-[#0C1B3A]/30">VAT {lineVAT.toFixed(2)}</p>}
+                    {sellPrice > 0 && <p className="text-[8px] text-[#0C1B3A]/25">+{lineVAT.toFixed(1)} VAT</p>}
                   </div>
                 </div>
               );
@@ -2232,24 +2265,128 @@ export default function App() {
 
         {/* Note */}
         <p className="text-center text-[9px] text-[#0C1B3A]/30 font-bold uppercase tracking-widest">
-          ⚠ Selling prices are manual · System calculates profit &amp; VAT only · 系统仅做计算辅助，定价由人决定
+          ⚠ Selling prices are manual · Enter Selling Price or Markup% · System calculates profit &amp; VAT · 定价由人决定，系统只做计算
         </p>
 
-        {/* Step 5 Final Actions */}
+        {/* Step 5: Generate GCI Quote */}
         <div className="flex items-center gap-2 justify-center">
           <div className="h-px flex-1 bg-[#0C1B3A]/8" />
-          <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] px-3">Step 5 · Final Actions</span>
+          <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] px-3">Step 5 · Generate GCI Quote</span>
           <div className="h-px flex-1 bg-[#0C1B3A]/8" />
         </div>
-        <div className="flex flex-col sm:flex-row gap-4 max-w-2xl mx-auto w-full">
+        <div className="flex justify-center">
           <button
-            onClick={handleSendTradeToTrade}
+            onClick={() => {
+              if (totalSelling <= 0) { alert('请先为所有品项输入销售价格 Please enter selling prices first'); return; }
+              setQuoteGenerated(true);
+            }}
             disabled={totalSelling <= 0}
-            className="flex-1 p-5 rounded-[24px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-12 py-5 rounded-[24px] bg-[#C9A84C] text-[#0C1B3A] font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#E8C96A] transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-3"
           >
-            <ExternalLink className="w-4 h-4" /> Send to TRADE
+            <FileText className="w-4 h-4" /> Generate GCI Quote
           </button>
         </div>
+
+        {/* GCI Quotation Draft — shown after Generate */}
+        {quoteGenerated && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 border-t-2 border-[#C9A84C]/20 pt-8">
+            {/* Draft header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[8px] font-black uppercase tracking-[0.3em] text-white bg-[#C9A84C] px-3 py-1 rounded-full">GCI Quotation Draft</span>
+                </div>
+                <h3 className="text-xl font-black text-[#0C1B3A]">GCI Customer Quote</h3>
+              </div>
+              <button onClick={() => setQuoteGenerated(false)} className="text-[9px] text-[#0C1B3A]/30 hover:text-[#0C1B3A] uppercase tracking-widest font-bold transition-colors">← Edit Prices</button>
+            </div>
+
+            {/* Quote info card */}
+            <div className="bg-[#0C1B3A] rounded-[24px] p-6 grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {[
+                { label: 'Customer / Project', value: quoteInfo.customerProjectName || '—' },
+                { label: 'Quote No', value: quoteInfo.quoteNumber || 'Auto' },
+                { label: 'Date', value: quoteInfo.date || '—' },
+                { label: 'Salesperson', value: quoteInfo.salesperson || '—' },
+                { label: 'Source', value: _businessIdParam ? `DEAL · ${_businessIdParam}` : 'Manual' },
+                { label: 'Items', value: `${confirmed.length} line items` },
+              ].map(f => (
+                <div key={f.label}>
+                  <p className="text-[8px] font-black uppercase tracking-wider text-white/30 mb-0.5">{f.label}</p>
+                  <p className="text-[11px] font-bold text-white truncate">{f.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Financials summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {[
+                { label: 'Supplier Cost', value: `AED ${totalSupplierCost.toFixed(2)}`, color: 'text-[#0C1B3A]/60' },
+                { label: 'Selling (excl VAT)', value: `AED ${totalSelling.toFixed(2)}`, color: 'text-[#0C1B3A]' },
+                { label: `Profit · ${overallMargin.toFixed(1)}%`, value: `AED ${totalProfit.toFixed(2)}`, color: totalProfit > 0 ? 'text-green-600' : 'text-red-500' },
+                { label: 'VAT 5%', value: `AED ${totalVAT.toFixed(2)}`, color: 'text-[#0C1B3A]/60' },
+                { label: 'Grand Total', value: `AED ${grandTotal.toFixed(2)}`, color: 'text-[#C9A84C] text-lg' },
+              ].map(f => (
+                <div key={f.label} className="bg-white rounded-[16px] border border-[#0C1B3A]/8 p-4 text-center">
+                  <p className="text-[8px] font-black uppercase tracking-wider text-[#0C1B3A]/30 mb-1">{f.label}</p>
+                  <p className={`font-black font-mono text-base ${f.color}`}>{f.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Items table (read-only) */}
+            <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 overflow-hidden">
+              <div className="grid grid-cols-12 gap-2 px-5 py-2.5 bg-[#0C1B3A]/5 text-[8px] font-black uppercase tracking-wider text-[#0C1B3A]/50">
+                <div className="col-span-5">Item</div>
+                <div className="col-span-1 text-center">Qty</div>
+                <div className="col-span-2 text-right">Unit Price (AED)</div>
+                <div className="col-span-2 text-right">Subtotal</div>
+                <div className="col-span-1 text-right">VAT</div>
+                <div className="col-span-1 text-right">Total</div>
+              </div>
+              <div className="divide-y divide-[#0C1B3A]/5">
+                {confirmed.map(item => {
+                  const sp = sellingPrices[item.id] || 0;
+                  const sub = sp * item.quantity;
+                  const vat = sub * 0.05;
+                  return (
+                    <div key={item.id} className="grid grid-cols-12 gap-2 px-5 py-3 items-center">
+                      <div className="col-span-5">
+                        <p className="text-[11px] font-bold text-[#0C1B3A]">{item.originalName}</p>
+                        {item.originalSpec && <p className="text-[9px] text-[#0C1B3A]/40">{item.originalSpec}</p>}
+                      </div>
+                      <div className="col-span-1 text-center text-[10px] font-mono text-[#0C1B3A]">{item.quantity}</div>
+                      <div className="col-span-2 text-right text-[10px] font-mono text-[#0C1B3A]">{sp.toFixed(2)}</div>
+                      <div className="col-span-2 text-right text-[10px] font-mono text-[#0C1B3A]">{sub.toFixed(2)}</div>
+                      <div className="col-span-1 text-right text-[9px] font-mono text-[#0C1B3A]/40">{vat.toFixed(2)}</div>
+                      <div className="col-span-1 text-right text-[10px] font-black font-mono text-[#0C1B3A]">{(sub + vat).toFixed(2)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="px-5 py-3 bg-[#0C1B3A] flex justify-end items-center gap-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Grand Total (incl 5% VAT)</p>
+                <p className="text-xl font-black font-mono text-[#C9A84C]">AED {grandTotal.toFixed(2)}</p>
+              </div>
+            </div>
+
+            {/* Final action buttons */}
+            <div className="flex flex-col sm:flex-row gap-4 pt-2">
+              <button
+                onClick={generatePDF}
+                className="flex-1 p-5 rounded-[24px] bg-white border-2 border-[#0C1B3A]/15 text-[#0C1B3A] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs hover:border-[#C9A84C] transition-all active:scale-95"
+              >
+                <Download className="w-4 h-4" /> Download PDF
+              </button>
+              <button
+                onClick={handleSendTradeToTrade}
+                className="flex-1 p-5 rounded-[24px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30"
+              >
+                <ExternalLink className="w-4 h-4" /> Send to TRADE
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2650,29 +2787,167 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex justify-center">
-        <div className="flex bg-brand-beige/20 p-1 rounded-2xl border border-brand-beige">
-          <button 
-            onClick={() => setActiveTab('items')}
-            className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'items' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
-          >
-            {(quoteType === 'trade' || quoteType === 'boq') ? 'Supplier Cost Items' : t('Project Package Items')}
-          </button>
-          <button
-            onClick={() => setActiveTab('draft')}
-            className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'draft' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
-          >
-            {(quoteType === 'trade' || quoteType === 'boq') ? 'GCI Quotation Draft' : t('Project Package Draft')}
-            {draftItems.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-brand-gold text-[10px] text-white flex items-center justify-center rounded-full border-2 border-brand-beige shadow-sm">
-                {draftItems.length}
-              </span>
-            )}
-          </button>
+      {/* Tab switcher — package path only. Trade/BOQ shows linear sections below. */}
+      {!(quoteType === 'trade' || quoteType === 'boq') && (
+        <div className="flex justify-center">
+          <div className="flex bg-brand-beige/20 p-1 rounded-2xl border border-brand-beige">
+            <button
+              onClick={() => setActiveTab('items')}
+              className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'items' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
+            >
+              {t('Project Package Items')}
+            </button>
+            <button
+              onClick={() => setActiveTab('draft')}
+              className={`px-8 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'draft' ? 'bg-white text-brand-brown shadow-sm' : 'text-brand-brown-muted hover:text-brand-brown'}`}
+            >
+              {t('Project Package Draft')}
+              {draftItems.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-brand-gold text-[10px] text-white flex items-center justify-center rounded-full border-2 border-brand-beige shadow-sm">
+                  {draftItems.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {activeTab === 'items' ? (
+      {/* ── Trade/BOQ: Supplier Cost Items editable table ─────────────── */}
+      {(quoteType === 'trade' || quoteType === 'boq') && draftItems.length > 0 && (
+        <div className="space-y-6 animate-in fade-in duration-500">
+          {/* Section header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Step 1</span>
+              </div>
+              <h3 className="text-xl font-black text-[#0C1B3A]">Supplier Cost Items</h3>
+              <p className="text-[10px] text-[#0C1B3A]/50 mt-0.5">Review and correct AI-parsed supplier costs · 核对供应商成本数据</p>
+            </div>
+            <span className="text-[9px] font-bold text-[#0C1B3A]/30 uppercase tracking-widest">{draftItems.length} items</span>
+          </div>
+
+          {/* Editable cost table */}
+          <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+            {/* Header */}
+            <div className="grid grid-cols-12 gap-2 px-5 py-3 bg-[#0C1B3A] text-white text-[9px] font-black uppercase tracking-wider">
+              <div className="col-span-3">Item Name</div>
+              <div className="col-span-3">Description / Spec</div>
+              <div className="col-span-1 text-center">Qty</div>
+              <div className="col-span-1 text-center">Unit</div>
+              <div className="col-span-2 text-right">Supplier Cost</div>
+              <div className="col-span-1 text-center">CCY</div>
+              <div className="col-span-1 text-right">Notes</div>
+            </div>
+            {/* Rows */}
+            <div className="divide-y divide-[#0C1B3A]/5">
+              {draftItems.map((item, idx) => (
+                <div key={item.id} className="grid grid-cols-12 gap-2 px-5 py-3 items-center hover:bg-[#0C1B3A]/2 transition-colors">
+                  {/* Item Name */}
+                  <div className="col-span-3">
+                    <input
+                      value={item.originalName}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalName: e.target.value } : it))}
+                      className="w-full text-[11px] font-bold text-[#0C1B3A] bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5 transition-colors"
+                    />
+                  </div>
+                  {/* Spec */}
+                  <div className="col-span-3">
+                    <input
+                      value={item.originalSpec || ''}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalSpec: e.target.value } : it))}
+                      placeholder="—"
+                      className="w-full text-[10px] text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none py-0.5 transition-colors placeholder:text-[#0C1B3A]/20"
+                    />
+                  </div>
+                  {/* Qty */}
+                  <div className="col-span-1">
+                    <input
+                      type="number" min="0" step="1"
+                      value={item.quantity}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: Number(e.target.value) || 0, targetTotal: (Number(e.target.value) || 0) * it.targetUnitPrice } : it))}
+                      className="w-full text-[11px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5"
+                    />
+                  </div>
+                  {/* Unit */}
+                  <div className="col-span-1">
+                    <input
+                      value={item.unit}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, unit: e.target.value } : it))}
+                      className="w-full text-[10px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none py-0.5"
+                    />
+                  </div>
+                  {/* Supplier Cost per unit */}
+                  <div className="col-span-2 text-right">
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={item.targetUnitPrice || ''}
+                      placeholder="0.00"
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value) || 0, targetTotal: (Number(e.target.value) || 0) * it.quantity } : it))}
+                      className="w-full text-right text-[11px] font-mono font-black text-[#0C1B3A] bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5"
+                    />
+                    <p className="text-[8px] text-[#0C1B3A]/25 text-right mt-0.5">Total: {(item.targetUnitPrice * item.quantity).toFixed(2)}</p>
+                  </div>
+                  {/* Currency */}
+                  <div className="col-span-1 text-center">
+                    <select
+                      value={tradeItemCurrencies[item.id] || 'AED'}
+                      onChange={e => setTradeItemCurrencies(prev => ({ ...prev, [item.id]: e.target.value }))}
+                      className="text-[9px] font-bold text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 outline-none w-full text-center"
+                    >
+                      {['AED','USD','CNY','EUR','GBP'].map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  {/* Notes + Delete */}
+                  <div className="col-span-1 flex items-center gap-1">
+                    <input
+                      value={tradeItemNotes[item.id] || ''}
+                      placeholder="—"
+                      onChange={e => setTradeItemNotes(prev => ({ ...prev, [item.id]: e.target.value }))}
+                      className="w-full text-[9px] text-[#0C1B3A]/40 bg-transparent border-b border-[#0C1B3A]/6 focus:border-[#C9A84C] outline-none py-0.5 placeholder:text-[#0C1B3A]/15"
+                    />
+                    <button
+                      onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
+                      className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove item"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Footer totals */}
+            <div className="px-5 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
+              <button
+                onClick={() => setDraftItems(prev => [...prev, { id: `manual-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed', suggestedCategory: FurnitureCategory.OTHER }])}
+                className="text-[9px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-1.5"
+              >
+                <Plus className="w-3 h-3" /> Add Item
+              </button>
+              <div className="text-right">
+                <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total Supplier Cost</p>
+                <p className="text-base font-black font-mono text-[#0C1B3A]">
+                  AED {draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Proceed to Pricing button */}
+          <div className="flex justify-end">
+            <button
+              onClick={() => setTradePhase('pricing')}
+              className="px-10 py-5 bg-[#0C1B3A] text-[#C9A84C] rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-[#0F2551] active:scale-95 transition-all border border-[#C9A84C]/30 flex items-center gap-3"
+            >
+              Next: Set Selling Prices →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Trade/BOQ: no package items needed. Package path continues below. */}
+      {activeTab === 'items' && !(quoteType === 'trade' || quoteType === 'boq') ? (
         <>
           <div className="text-center space-y-4">
             <h2 className="text-4xl font-serif italic text-brand-brown">
@@ -2802,7 +3077,8 @@ export default function App() {
             )}
           </div>
         </>
-      ) : (
+      ) : !(quoteType === 'trade' || quoteType === 'boq') ? (
+        /* Package path: show existing AI configure/confirm draft table */
         <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 max-w-7xl mx-auto px-6 w-full">
            <div className="text-center space-y-4 mb-20">
             <div className="flex items-center justify-center gap-4">
@@ -3048,7 +3324,7 @@ export default function App() {
             </div>
           )}
         </div>
-      )}
+      ) : null /* trade/boq: draft handled by editable table above */}
     </div>
   );
 
