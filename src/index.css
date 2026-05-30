@@ -6,13 +6,20 @@
   --font-serif: "Cormorant Garamond", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  /* Brand Colors */
+  /* Brand Colors — original (configurator / PDF remain brown-gold) */
   --color-brand-ivory: #FDFBF7;
   --color-brand-beige: #F7F3EE;
   --color-brand-brown: #3E2723;
   --color-brand-brown-muted: #5D4037;
   --color-brand-gold: #C5A059;
   --color-brand-gold-muted: #D4C4A8;
+
+  /* GCI System Colors — shell / navigation (matches DEAL + TRADE OS) */
+  --color-gci-navy: #0C1B3A;
+  --color-gci-navy-mid: #0F2551;
+  --color-gci-gold: #C9A84C;
+  --color-gci-gold-light: #E8C96A;
+  --color-gci-slate: #F5F6FA;
 }
 
 @layer base {

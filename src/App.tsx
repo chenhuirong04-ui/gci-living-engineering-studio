@@ -57,6 +57,8 @@ import {
 import { GoogleGenAI, Type } from "@google/genai";
 import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
+import { StepIndicator } from './components/StepIndicator';
+import { TypeSelection, QuoteType } from './components/TypeSelection';
 import { 
   BedSize, 
   SIZE_DIMENSIONS,
@@ -211,6 +213,7 @@ export default function App() {
 
   const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(!!_prefillName);
   const [quoteMode, setQuoteMode] = useState<'single' | 'package' | null>(null);
+  const [quoteType, setQuoteType] = useState<QuoteType | null>(null);
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -430,6 +433,7 @@ export default function App() {
     setSelectedCategory(null);
     setProjectInfoSubmitted(false);
     setQuoteMode(null);
+    setQuoteType(null);
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -532,6 +536,20 @@ export default function App() {
     setQuoteHistory(updated);
     localStorage.setItem('gci_quote_history', JSON.stringify(updated));
     alert('报价已保存至历史记录 Saved to history');
+  };
+
+  // Handle 3-path type selection (Step 2)
+  const handleTypeSelect = (type: QuoteType) => {
+    setQuoteType(type);
+    if (type === 'package') {
+      setQuoteMode('package');
+      setActiveTab('items');
+    } else if (type === 'upload') {
+      setQuoteMode('package');
+      setActiveTab('draft');
+    } else {
+      setQuoteMode(null); // 'custom' — let category selection drive quoteMode
+    }
   };
 
   const sendToTrade = () => {
@@ -1929,7 +1947,8 @@ export default function App() {
   };
 
   const renderProjectInfo = () => (
-    <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
+    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
+      <StepIndicator current={1} />
       <div className="text-center space-y-6">
         <div className="inline-block px-4 py-1.5 bg-brand-gold/10 rounded-full mb-2">
           <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-brand-gold">Project Engineering Workspace</p>
@@ -2017,10 +2036,12 @@ export default function App() {
   const renderPackageWorkspace = () => (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
       <div className="flex justify-between items-center">
-        <button 
+        <button
           onClick={() => {
             setQuoteMode(null);
             setSelectedScenario(null);
+            setQuoteType(null);
+            setActiveTab('items');
           }}
           className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-brand-gold hover:text-brand-brown transition-all group"
         >
@@ -2744,7 +2765,8 @@ export default function App() {
       </div>
 
       <div className="space-y-16">
-        {/* Section 1: Individual Items */}
+        {/* Section 1: Individual Items — only shown for 'custom' path (or no path set) */}
+        {quoteType !== 'package' && (
         <section className="space-y-8">
           <div className="text-center space-y-3">
             <h2 className="text-3xl font-serif italic text-brand-brown">{t('Individual Item Quote')}</h2>
@@ -2773,8 +2795,10 @@ export default function App() {
             })}
           </div>
         </section>
+        )} {/* end quoteType !== 'package' */}
 
-        {/* Section 2: Project Packages */}
+        {/* Section 2: Project Packages — only shown for 'package' path (or no path set) */}
+        {quoteType !== 'custom' && (
         <section className="space-y-8 pt-12 border-t border-brand-beige/50">
           <div className="text-center space-y-3">
             <h2 className="text-3xl font-serif italic text-brand-brown">{t('Project Package Quote')}</h2>
@@ -2805,6 +2829,7 @@ export default function App() {
             })}
           </div>
         </section>
+        )} {/* end quoteType !== 'custom' */}
       </div>
     </div>
   );
@@ -3064,10 +3089,17 @@ export default function App() {
               </div>
            </div>
 
+            {/* Step 5 marker — final action row */}
+            <div className="flex items-center gap-2 justify-center mb-3">
+              <div className="h-px flex-1 bg-[#0C1B3A]/8" />
+              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] px-3">Step 5 · Final Actions</span>
+              <div className="h-px flex-1 bg-[#0C1B3A]/8" />
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-5 max-w-2xl mx-auto w-full">
               {quoteMode === 'package' ? (
-                <button 
-                  onClick={addToPackage} 
+                <button
+                  onClick={addToPackage}
                   className="flex-1 p-6 rounded-[28px] bg-brand-gold text-brand-ivory flex justify-center items-center gap-4 font-bold uppercase tracking-widest text-xs shadow-xl shadow-brand-gold/20 hover:bg-brand-gold/90 transition-all active:scale-95 group"
                 >
                   <PlusCircle className="w-5 h-5 text-white group-hover:scale-110 transition-transform" /> {t('Add to Project Package')}
@@ -4296,28 +4328,33 @@ export default function App() {
             </div>
           </div>
         )}
-        <header className="mb-14 flex justify-between items-end border-b border-brand-brown/10 pb-10">
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-               <span className="px-3 py-1 bg-brand-brown text-brand-ivory text-[8px] font-bold uppercase tracking-[0.25em] rounded-full">{t('Internal System')}</span>
-                <span className="text-[10px] font-bold text-brand-brown-muted uppercase tracking-widest italic">{t('Precision Calculated')}</span>
-            </div>
-            <h1 className="text-4xl font-serif italic tracking-tight text-brand-brown">GCI LIVING <span className="font-light text-brand-brown-muted not-italic ml-2 uppercase text-2xl tracking-[0.3em]">{t('Studio')}</span></h1>
-          </div>
+        <header className="mb-10 flex justify-between items-center bg-gradient-to-r from-[#0C1B3A] via-[#0F2551] to-[#0C1B3A] text-white px-8 py-4 rounded-[28px] shadow-xl">
           <div className="flex items-center gap-4">
-            <button 
+            <div className="bg-gradient-to-br from-[#C9A84C] to-[#A07C2D] w-9 h-9 rounded-xl flex items-center justify-center shadow-md shrink-0">
+              <span className="text-white font-black text-sm tracking-tight">G</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-black tracking-tight uppercase leading-none">GCI Quotation Center</h1>
+                <span className="text-[9px] bg-[#C9A84C]/20 border border-[#C9A84C]/30 px-2 py-0.5 rounded text-[#E8C96A] font-bold tracking-wide">LIVING STUDIO</span>
+              </div>
+              <p className="text-[10px] text-white/50 font-medium mt-0.5">FF&amp;E · Engineering Quotation · BOQ</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
               onClick={() => setView(view === 'history' ? 'configurator' : 'history')}
-              className={`p-4 border rounded-3xl transition-all flex items-center gap-3 group ${view === 'history' ? 'bg-brand-brown text-brand-ivory border-brand-brown' : 'bg-white border-brand-beige text-brand-brown hover:shadow-md'}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${view === 'history' ? 'bg-[#C9A84C] text-[#0C1B3A]' : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'}`}
             >
-              <FileText className="w-5 h-5 text-brand-gold" />
-              <span className="text-[10px] font-bold uppercase tracking-widest pr-2">{view === 'history' ? t('Back to Config') : t('History')}</span>
+              <FileText className="w-3.5 h-3.5" />
+              {view === 'history' ? 'Back' : t('History')}
             </button>
-            <button 
+            <button
               onClick={() => setShowSettings(true)}
-              className="p-4 bg-white border border-brand-beige rounded-3xl shadow-sm hover:shadow-md transition-all flex items-center gap-3 group"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-all"
             >
-              <Settings className="w-5 h-5 text-brand-gold group-hover:rotate-90 transition-transform duration-700 ease-in-out" />
-              <span className="text-[10px] font-bold text-brand-brown uppercase tracking-widest pr-2">{t('Pricing Table')}</span>
+              <Settings className="w-3.5 h-3.5" />
+              Pricing
             </button>
           </div>
         </header>
@@ -4368,15 +4405,24 @@ export default function App() {
               </div>
             ) : !projectInfoSubmitted ? (
               renderProjectInfo()
+            ) : !quoteType ? (
+              <TypeSelection
+                onSelect={handleTypeSelect}
+                onBack={() => setProjectInfoSubmitted(false)}
+                projectName={quoteInfo.customerProjectName}
+              />
             ) : quoteMode === 'package' && !selectedCategory ? (
               renderPackageWorkspace()
             ) : !selectedCategory ? (
               renderCategorySelection()
             ) : (
               <>
+                {/* Step Indicator — Step 3 = Category selected, Step 4 = final step (summary) */}
+                <StepIndicator current={currentStep >= STEPS.length - 1 ? 4 : 3} />
+
                 <div className="mb-10 flex items-center justify-between">
                   <div className="flex items-center gap-6">
-                    <button 
+                    <button
                       onClick={() => setSelectedCategory(null)}
                       className="p-3 bg-brand-beige/50 rounded-full hover:bg-brand-brown hover:text-brand-ivory transition-all text-brand-brown"
                     >
