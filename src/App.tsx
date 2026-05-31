@@ -61,7 +61,7 @@ import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
 import { TypeSelection, QuoteType } from './components/TypeSelection';
-import { saveQuotation, updateQuotation, loadByQuoteNo, markSentToTrade, QuotationItem } from './lib/quotationCloud';
+import { saveQuotation, updateQuotation, loadByQuoteNo, listQuotations, markSentToTrade, QuotationItem, QuotationRecord } from './lib/quotationCloud';
 import { 
   BedSize, 
   SIZE_DIMENSIONS,
@@ -225,10 +225,13 @@ export default function App() {
   const [quoteGenerated, setQuoteGenerated] = useState(false);
   const [tradeTerms, setTradeTerms] = useState<string>(''); // extracted terms / notes from supplier quote
   // Cloud save state
-  const [cloudId, setCloudId] = useState<string | null>(null);          // UUID after first save
+  const [cloudId, setCloudId] = useState<string | null>(null);
   const [cloudSaveStatus, setCloudSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [loadQuoteNo, setLoadQuoteNo] = useState<string>('');
   const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  // Cloud history
+  const [cloudHistory, setCloudHistory] = useState<QuotationRecord[]>([]);
+  const [cloudHistoryLoading, setCloudHistoryLoading] = useState(false);
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -443,6 +446,16 @@ export default function App() {
     }
   }, []);
 
+  // Load cloud history when switching to History view
+  useEffect(() => {
+    if (view !== 'history') return;
+    setCloudHistoryLoading(true);
+    listQuotations(60)
+      .then(records => setCloudHistory(records))
+      .catch(e => console.error('[Cloud History] Load failed:', e))
+      .finally(() => setCloudHistoryLoading(false));
+  }, [view]);
+
   const resetProject = () => {
     setSelectedScenario(null);
     setSelectedCategory(null);
@@ -648,8 +661,8 @@ export default function App() {
   };
 
   /** Load a quotation from cloud by quote_no and restore all state. */
-  const handleLoadDraft = async () => {
-    const qNo = loadQuoteNo.trim();
+  const handleLoadDraft = async (overrideQuoteNo?: string) => {
+    const qNo = (overrideQuoteNo || loadQuoteNo).trim();
     if (!qNo) return;
     setLoadStatus('loading');
     try {
@@ -721,6 +734,7 @@ export default function App() {
 
       setLoadStatus('idle');
       setLoadQuoteNo('');
+      setView('configurator'); // switch from history to the loaded quote
     } catch (e) {
       console.error('[Cloud Load] Error:', e);
       setLoadStatus('error');
@@ -2416,39 +2430,7 @@ export default function App() {
             </button>
           </div>
 
-          {/* ── Load Existing Draft ─────────────────────────────────────── */}
-          <div className="mt-6 pt-6 border-t border-brand-beige/60">
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-brown/40 text-center mb-4">
-              Or load an existing cloud draft
-            </p>
-            <div className="flex gap-3 max-w-md mx-auto">
-              <input
-                type="text"
-                value={loadQuoteNo}
-                onChange={e => { setLoadQuoteNo(e.target.value); setLoadStatus('idle'); }}
-                onKeyDown={e => e.key === 'Enter' && handleLoadDraft()}
-                placeholder="Enter Quote No  e.g. GCI-20250601-001"
-                className="flex-1 bg-transparent border-b-2 border-brand-beige text-base font-serif italic text-brand-brown focus:border-brand-gold outline-none pb-2 placeholder:text-brand-brown/20"
-              />
-              <button
-                onClick={handleLoadDraft}
-                disabled={!loadQuoteNo.trim() || loadStatus === 'loading'}
-                className="px-5 py-2 bg-[#0C1B3A] text-[#C9A84C] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#0F2551] transition-all disabled:opacity-40 flex items-center gap-2"
-              >
-                {loadStatus === 'loading' ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                )}
-                Load
-              </button>
-            </div>
-            {loadStatus === 'error' && (
-              <p className="text-center text-xs text-red-400 font-bold mt-3">
-                ⚠ Quote not found — check the quote number and try again
-              </p>
-            )}
-          </div>
+          {/* Load from History — done via History tab, not here */}
         </div>
       </div>
     </div>
@@ -2680,6 +2662,8 @@ export default function App() {
             onClick={() => {
               if (totalSelling <= 0) { alert('请先为所有品项输入销售价格 Please enter selling prices first'); return; }
               setQuoteGenerated(true);
+              // Auto-save to cloud on generate
+              handleSaveToCloud(confirmed, { totalSupplierCost, totalSelling, totalProfit, overallMargin, totalVAT, grandTotal });
             }}
             disabled={totalSelling <= 0}
             className="px-12 py-5 rounded-[24px] bg-[#C9A84C] text-[#0C1B3A] font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#E8C96A] transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-3"
@@ -5378,7 +5362,7 @@ export default function App() {
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${view === 'history' ? 'bg-[#C9A84C] text-[#0C1B3A]' : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'}`}
             >
               <FileText className="w-3.5 h-3.5" />
-              {view === 'history' ? 'Back' : t('History')}
+              {view === 'history' ? '← Back' : 'History'}
             </button>
             <button
               onClick={() => setShowSettings(true)}
@@ -5393,46 +5377,89 @@ export default function App() {
         <main className="bg-white rounded-[56px] shadow-[0_45px_120px_-30px_rgba(62,39,35,0.08)] border border-brand-beige overflow-hidden">
           <div className="p-8 sm:p-20 min-h-[650px] flex flex-col">
             {view === 'history' ? (
-              <div className="space-y-12">
-                <div className="text-center space-y-4">
-                  <h2 className="text-3xl font-serif italic text-brand-brown">{t('Quotation History Title')}</h2>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Review and manage past quotations</p>
+              <div className="space-y-10">
+                {/* Header */}
+                <div className="text-center space-y-2">
+                  <h2 className="text-3xl font-serif italic text-brand-brown">Quotation History</h2>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">All saved quotes · Click to open &amp; continue</p>
                 </div>
-                <div className="space-y-6">
-                  {quoteHistory.length === 0 ? (
-                    <div className="text-center py-20 border-2 border-dashed border-brand-beige rounded-[40px] text-brand-brown-muted">
-                        <Archive className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p className="font-serif italic text-lg">{t('No records found')}</p>
+
+                {/* ── Section 1: Cloud Trade/BOQ Quotes ───────────────── */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">Trade &amp; Sourcing · BOQ</span>
+                    <div className="h-px flex-1 bg-[#0C1B3A]/10" />
+                    {cloudHistoryLoading && <RefreshCw className="w-3.5 h-3.5 text-[#C9A84C] animate-spin" />}
+                    <span className="text-[9px] text-[#0C1B3A]/30 font-bold uppercase">Cloud · Auto-saved</span>
+                  </div>
+
+                  {!cloudHistoryLoading && cloudHistory.length === 0 && (
+                    <div className="text-center py-10 border-2 border-dashed border-[#0C1B3A]/8 rounded-[28px] text-[#0C1B3A]/30">
+                      <p className="text-sm font-serif italic">No cloud quotes yet</p>
+                      <p className="text-[10px] mt-1">Quotes auto-save when you click Generate GCI Quote</p>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {quoteHistory.map(quote => (
-                        <div key={quote.id} className="p-8 bg-brand-beige/20 border border-brand-beige rounded-[32px] flex flex-col sm:flex-row justify-between items-center gap-6 hover:shadow-lg transition-all group">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold text-brand-gold uppercase tracking-widest">{quote.date} | {quote.quoteNumber}</span>
-                            <h3 className="text-xl font-serif italic text-brand-brown">{quote.customerProjectName || '未命名项目'}</h3>
-                            <div className="flex items-center gap-2 mt-2">
-                               <span className="px-2 py-0.5 bg-brand-brown text-brand-ivory text-[8px] font-bold uppercase rounded-full">{t(quote.category)}</span>
-                               <span className="text-[10px] text-brand-brown-muted italic">By: {quote.salesperson || 'Staff'}</span>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {cloudHistory.map(rec => {
+                      const statusColor = rec.status === 'SENT_TO_TRADE' ? 'bg-green-100 text-green-700' : rec.status === 'GENERATED' ? 'bg-[#C9A84C]/15 text-[#A07C2D]' : 'bg-[#0C1B3A]/8 text-[#0C1B3A]/50';
+                      return (
+                        <div
+                          key={rec.id}
+                          className="p-5 bg-white border border-[#0C1B3A]/8 rounded-[24px] flex items-center gap-5 hover:border-[#C9A84C] hover:shadow-lg transition-all group cursor-pointer"
+                          onClick={() => handleLoadDraft(rec.quote_no)}
+                        >
+                          {/* Left: info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${statusColor}`}>
+                                {rec.status?.replace('_', ' ')}
+                              </span>
+                              <span className="text-[9px] font-bold text-[#0C1B3A]/30 uppercase">{rec.quote_type}</span>
+                              {rec.source === 'DEAL' && <span className="text-[8px] font-black text-[#C9A84C] bg-[#C9A84C]/10 px-1.5 py-0.5 rounded">DEAL</span>}
                             </div>
+                            <h3 className="text-base font-black text-[#0C1B3A] truncate">{rec.customer_name || '—'}</h3>
+                            <p className="text-[10px] text-[#0C1B3A]/40 mt-0.5">{rec.quote_no} · {rec.quote_date} · {rec.salesperson || 'Staff'}</p>
                           </div>
-                          <div className="flex items-center gap-8">
-                             <div className="text-right">
-                               <span className="text-[10px] font-bold text-brand-brown-muted uppercase block">Total Amount</span>
-                               <span className="text-2xl font-serif italic text-brand-brown">{quote.totalAmount.toLocaleString(undefined, {maximumFractionDigits:0})} <span className="text-xs not-italic">AED</span></span>
-                             </div>
-                             <button 
-                                onClick={() => restoreQuote(quote)}
-                                className="p-4 bg-white border border-brand-beige rounded-full text-brand-gold hover:bg-brand-brown hover:text-brand-ivory transition-all"
-                              >
-                               <ChevronRight className="w-5 h-5" />
-                             </button>
+                          {/* Right: amounts */}
+                          <div className="text-right shrink-0">
+                            <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30">Grand Total</p>
+                            <p className="text-lg font-black font-mono text-[#0C1B3A]">AED {(rec.grand_total || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                            {rec.margin_percent > 0 && <p className="text-[9px] text-green-600 font-bold">{rec.margin_percent.toFixed(1)}% margin</p>}
                           </div>
+                          <ChevronRight className="w-5 h-5 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors shrink-0" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── Section 2: Local Custom BOM Quotes ──────────────── */}
+                {quoteHistory.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-brand-brown/60">Custom Item Quotes</span>
+                      <div className="h-px flex-1 bg-brand-beige" />
+                      <span className="text-[9px] text-brand-brown/30 font-bold uppercase">Local · BOM</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3">
+                      {quoteHistory.map(quote => (
+                        <div key={quote.id} className="p-6 bg-brand-beige/20 border border-brand-beige rounded-[24px] flex items-center gap-5 hover:shadow-md transition-all group cursor-pointer" onClick={() => restoreQuote(quote)}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[9px] font-bold text-brand-gold uppercase tracking-widest">{quote.date} · {quote.quoteNumber}</p>
+                            <h3 className="text-base font-serif italic text-brand-brown truncate">{quote.customerProjectName || '未命名'}</h3>
+                            <p className="text-[10px] text-brand-brown-muted mt-0.5">{t(quote.category)} · {quote.salesperson || 'Staff'}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-[9px] font-bold text-brand-brown-muted uppercase block">Total</span>
+                            <span className="text-lg font-serif italic text-brand-brown">{quote.totalAmount.toLocaleString(undefined, {maximumFractionDigits:0})} AED</span>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-brand-gold/40 group-hover:text-brand-brown transition-colors shrink-0" />
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             ) : !projectInfoSubmitted ? (
               renderProjectInfo()

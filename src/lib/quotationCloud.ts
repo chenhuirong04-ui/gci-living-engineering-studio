@@ -193,6 +193,18 @@ export async function loadByQuoteNo(quoteNo: string): Promise<LoadedQuotation | 
 }
 
 /**
+ * List all quotations, newest first.
+ */
+export async function listQuotations(limit = 60): Promise<QuotationRecord[]> {
+  const res = await sbFetch(
+    `/rest/v1/quotation_records?order=updated_at.desc&limit=${limit}`,
+    { method: 'GET' }
+  );
+  if (!res) return [];
+  return res.json().catch(() => []);
+}
+
+/**
  * Mark a quotation as SENT_TO_TRADE and optionally write the PI id.
  */
 export async function markSentToTrade(id: string, tradePiId?: string): Promise<void> {
