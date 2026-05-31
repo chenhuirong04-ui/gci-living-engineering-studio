@@ -2540,6 +2540,7 @@ Return ONLY valid JSON:
   const renderTradeQuoteReview = () => {
     const confirmed = draftItems.filter(it => it.status === 'Confirmed');
     const totalSupplierCost = confirmed.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
+    console.log('[Pricing View] Confirmed items:', confirmed.length, '| Supplier Total:', totalSupplierCost.toFixed(2));
     const totalSelling = confirmed.reduce((s, it) => s + (sellingPrices[it.id] || 0) * it.quantity, 0);
     const totalProfit = totalSelling - totalSupplierCost;
     const overallMargin = totalSupplierCost > 0 ? (totalProfit / totalSupplierCost) * 100 : 0;
@@ -3477,7 +3478,20 @@ Return ONLY valid JSON:
           {/* Proceed to Pricing button */}
           <div className="flex justify-end">
             <button
-              onClick={() => setTradePhase('pricing')}
+              onClick={() => {
+                // Mark ALL items as Confirmed so none are dropped in Pricing
+                const before = draftItems;
+                const allConfirmed = before.map(it => ({ ...it, status: 'Confirmed' as const }));
+                const supplierTotal = allConfirmed.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
+                console.log('[Pricing] Before items count:', before.length);
+                console.log('[Pricing] After items count (all confirmed):', allConfirmed.length);
+                console.log('[Pricing] Supplier Cost Items Total:', supplierTotal.toFixed(2), 'AED');
+                allConfirmed.forEach((it, i) =>
+                  console.log(`  [${i+1}] ${it.originalName} | qty:${it.quantity} | cost:${it.targetUnitPrice} | line:${(it.targetUnitPrice*it.quantity).toFixed(2)}`)
+                );
+                setDraftItems(allConfirmed);
+                setTradePhase('pricing');
+              }}
               className="px-10 py-5 bg-[#0C1B3A] text-[#C9A84C] rounded-full text-[11px] font-black uppercase tracking-widest shadow-xl hover:bg-[#0F2551] active:scale-95 transition-all border border-[#C9A84C]/30 flex items-center gap-3"
             >
               Next: Set Selling Prices →

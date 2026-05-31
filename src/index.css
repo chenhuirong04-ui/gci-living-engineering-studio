@@ -48,6 +48,37 @@
   }
 }
 
+/* ── GCI Business Typography Scale ────────────────────────────────────────
+   Tailwind fixed-px sizes are too small for daily business use.
+   These overrides raise the floor without changing layout structure.
+   Target: breadcrumbs ≥13px, labels ≥13px, data ≥14px, buttons ≥14px.
+   Print styles are not affected (print block overrides via @media print).
+──────────────────────────────────────────────────────────────────────── */
+
+/* Sub-label / badge text — lift from invisible to legible */
+.text-\[7px\]  { font-size: 10px !important; }
+.text-\[8px\]  { font-size: 11px !important; }
+.text-\[9px\]  { font-size: 12px !important; }
+
+/* Helper text, breadcrumbs, form labels — minimum 13px */
+.text-\[10px\] { font-size: 13px !important; }
+
+/* Table data, button text, input values — minimum 14px */
+.text-\[11px\] { font-size: 14px !important; }
+
+/* Placeholders — less faint so users can read hints */
+input::placeholder,
+textarea::placeholder {
+  opacity: 0.45;
+}
+
+/* Tracking-widest at small sizes needs a tiny letter-spacing boost */
+.text-\[10px\].tracking-widest,
+.text-\[9px\].tracking-widest,
+.text-\[8px\].tracking-widest {
+  letter-spacing: 0.08em;
+}
+
 /* Hide scrollbar for Chrome, Safari and Opera */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
