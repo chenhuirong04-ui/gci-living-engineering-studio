@@ -1898,63 +1898,74 @@ export default function App() {
   const parsePDF = async (file: File) => {
     setIsProcessingAI(true);
     try {
+      // ── Step 1: file type ──────────────────────────────────────────────
+      console.log('[PDF] Step 1 file.type:', file.type, '| file.name:', file.name, '| size:', file.size);
+
+      // ── Step 2: base64 ────────────────────────────────────────────────
       const base64 = await fileToBase64(file);
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      console.log('[PDF] Step 2 base64 length:', base64.length, '| first 40 chars:', base64.slice(0, 40));
 
-      const prompt = `
-        Analyze this supplier quote / quotation PDF document.
-        Separate the content into TWO categories:
+      // ── Step 3: API key ───────────────────────────────────────────────
+      const apiKey = process.env.GEMINI_API_KEY || '';
+      console.log('[PDF] Step 3 API key present:', apiKey.length > 0, '| key prefix:', apiKey.slice(0, 8));
 
-        1. PRODUCT ITEMS: Real products or services with quantities and prices.
-        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions.
+      const ai = new GoogleGenAI({ apiKey });
 
-        Do NOT include the following as product items (put them in terms instead):
-        - Payment / Payment terms
-        - Lead time / Delivery time
-        - Validity / Offer validity
-        - Warranty / Guarantee
-        - Remarks / Notes / Comments
-        - Any row that has no quantity or no price and is clearly a condition or remark
+      const prompt = `Analyze this supplier quote PDF. Separate into:
+1. PRODUCT ITEMS with quantity and price (return in "items" array).
+2. TERMS such as payment, lead time, validity, remarks (return in "terms" string).
 
-        Return ONLY valid JSON in this exact format:
-        {
-          "items": [
-            {
-              "originalName": "Item name",
-              "originalSpec": "Size/Spec/Description",
-              "quantity": 1,
-              "unit": "pc",
-              "targetUnitPrice": 0,
-              "targetTotal": 0
-            }
-          ],
-          "terms": "Payment: ... | Lead time: ... | Notes: ..."
-        }
-        If no terms found, set terms to "". If no items found, set items to [].
-      `;
+Return ONLY valid JSON:
+{"items":[{"originalName":"name","originalSpec":"spec","quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0}],"terms":"..."}`;
 
-      // PDF + responseMimeType:'application/json' causes Gemini to throw.
-      // Omit responseMimeType — prompt asks for JSON, extract it from raw text.
-      const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: [
-          {
+      // ── Step 4: Gemini call ───────────────────────────────────────────
+      console.log('[PDF] Step 4 calling Gemini...');
+      let response: any;
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-1.5-flash',
+          contents: [{
             role: 'user',
             parts: [
               { text: prompt },
               { inlineData: { mimeType: 'application/pdf', data: base64 } },
             ],
-          },
-        ],
-        // NO responseMimeType here — that combination throws with PDF input
-      });
+          }],
+        });
+        console.log('[PDF] Step 4 Gemini responded OK');
+      } catch (geminiErr: any) {
+        const msg = geminiErr?.message || geminiErr?.toString() || 'unknown Gemini error';
+        console.error('[PDF] Step 4 Gemini FAILED:', msg, geminiErr);
+        alert(`PDF → Gemini call failed:\n${msg}\n\nCheck browser console for details.`);
+        return;
+      }
 
+      // ── Step 5: response.text ──────────────────────────────────────────
       const rawText = response.text || '';
-      // Extract the first JSON object from the response text
+      console.log('[PDF] Step 5 rawText length:', rawText.length, '| first 200:', rawText.slice(0, 200));
+
+      if (!rawText) {
+        alert('PDF: Gemini returned empty response. Check console for details.');
+        return;
+      }
+
+      // ── Step 6: JSON extract ───────────────────────────────────────────
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      console.log('[PDF] Step 6 JSON match found:', !!jsonMatch);
+
+      let parsed: any = {};
+      try {
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      } catch (jsonErr: any) {
+        console.error('[PDF] Step 6 JSON parse failed:', jsonErr, '| rawText:', rawText);
+        alert(`PDF: JSON parse failed.\nRaw response:\n${rawText.slice(0, 300)}`);
+        return;
+      }
+
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
       const extractedTerms: string = parsed.terms || '';
+      console.log('[PDF] Step 6 items:', extractedItems.length, '| terms:', extractedTerms.slice(0, 80));
+
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
 
       const rows = extractedItems.map((it: any, idx: number) => ({
@@ -1964,14 +1975,15 @@ export default function App() {
       }));
 
       if (rows.length === 0) {
-        alert('AI could not extract items from this PDF. If it is a scanned/image PDF, try exporting as PNG or JPG and uploading the image instead.');
+        alert(`PDF: AI returned 0 items.\nRaw response:\n${rawText.slice(0, 400)}\n\nIf scanned PDF, export page as PNG/JPG and re-upload.`);
         return;
       }
 
       await processWithAI(rows);
-    } catch (err) {
-      console.error('PDF Analysis Error:', err);
-      alert('PDF analysis failed. If this is a scanned PDF (image-based), please export the page as a PNG/JPG image and upload the image instead.');
+    } catch (err: any) {
+      const msg = err?.message || err?.toString() || 'unknown error';
+      console.error('[PDF] Unexpected error:', err);
+      alert(`PDF analysis error:\n${msg}`);
     } finally {
       setIsProcessingAI(false);
     }
