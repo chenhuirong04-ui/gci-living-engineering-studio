@@ -65,6 +65,10 @@ import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
 import { TypeSelection, QuoteType } from './components/TypeSelection';
 import { saveQuotation, updateQuotation, loadByQuoteNo, listQuotations, markSentToTrade, QuotationItem, QuotationRecord } from './lib/quotationCloud';
+import {
+  saveSupplierQuote, listSupplierQuotes, loadSupplierQuote, markSupplierQuoteConverted,
+  generateSupplierQuoteNo, SupplierQuote, SupplierQuoteItem,
+} from './lib/supplierQuoteCloud';
 import { 
   BedSize, 
   SIZE_DIMENSIONS,
@@ -241,6 +245,11 @@ export default function App() {
   // Cloud history
   const [cloudHistory, setCloudHistory] = useState<QuotationRecord[]>([]);
   const [cloudHistoryLoading, setCloudHistoryLoading] = useState(false);
+  // Supplier Quote Archive
+  const [historyTab, setHistoryTab] = useState<'supplier' | 'gci'>('gci');
+  const [supplierQuotes, setSupplierQuotes] = useState<SupplierQuote[]>([]);
+  const [supplierQuotesLoading, setSupplierQuotesLoading] = useState(false);
+  const [sqSaveStatus, setSqSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -458,11 +467,18 @@ export default function App() {
   // Load cloud history when switching to History view
   useEffect(() => {
     if (view !== 'history') return;
+    // Load GCI Quotes
     setCloudHistoryLoading(true);
     listQuotations(60)
       .then(records => setCloudHistory(records))
       .catch(e => console.error('[Cloud History] Load failed:', e))
       .finally(() => setCloudHistoryLoading(false));
+    // Load Supplier Quotes
+    setSupplierQuotesLoading(true);
+    listSupplierQuotes(60)
+      .then(records => setSupplierQuotes(records))
+      .catch(e => console.error('[Supplier Quotes] Load failed:', e))
+      .finally(() => setSupplierQuotesLoading(false));
   }, [view]);
 
   const resetProject = () => {
@@ -481,6 +497,7 @@ export default function App() {
     setSentToTrade(false);
     setPdfDownloaded(false);
     setCloudId(null);
+    setSqSaveStatus('idle');
     setCloudSaveStatus('idle');
     setPackageItems([]);
     setCurrentStep(0);
@@ -750,6 +767,95 @@ export default function App() {
       console.error('[Cloud Load] Error:', e);
       setLoadStatus('error');
     }
+  };
+
+  // ── Supplier Quote Archive ────────────────────────────────────────────────
+
+  /** Save current draftItems as a Supplier Quote (no GCI pricing required). */
+  const handleSaveSupplierQuote = async () => {
+    if (draftItems.length === 0) return;
+    setSqSaveStatus('saving');
+    try {
+      const totalCost = draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
+      const header: SupplierQuote = {
+        supplier_quote_no: generateSupplierQuoteNo(),
+        supplier_name: '',   // user can edit in archive
+        currency: 'AED',
+        quote_date: quoteInfo.date || new Date().toISOString().split('T')[0],
+        terms_notes: tradeTerms || undefined,
+        uploaded_by: quoteInfo.salesperson || 'Admin',
+        status: 'Active',
+        total_cost: Number(totalCost.toFixed(2)),
+      };
+      const items: SupplierQuoteItem[] = draftItems.map((it, i) => ({
+        item_name: it.originalName,
+        description: it.originalSpec || '',
+        qty: it.quantity,
+        unit: it.unit,
+        supplier_cost: it.targetUnitPrice,
+        currency: tradeItemCurrencies[it.id] || 'AED',
+        notes: tradeItemNotes[it.id] || '',
+        sort_order: i,
+      }));
+      const id = await saveSupplierQuote(header, items);
+      if (id) {
+        setSqSaveStatus('saved');
+        // Refresh supplier quotes list if history is open
+        if (view === 'history') {
+          listSupplierQuotes(60).then(setSupplierQuotes).catch(() => {});
+        }
+      } else {
+        setSqSaveStatus('error');
+      }
+    } catch (e) {
+      console.error('[Supplier Quote Save] Error:', e);
+      setSqSaveStatus('error');
+    }
+  };
+
+  /** Load a supplier quote and enter GCI pricing flow to create a GCI Quote. */
+  const handleCreateGCIQuoteFromSupplier = async (sq: SupplierQuote) => {
+    if (!sq.id) return;
+    const result = await loadSupplierQuote(sq.id);
+    if (!result) { alert('Failed to load supplier quote'); return; }
+
+    const { items } = result;
+    // Restore draftItems from supplier quote items
+    const restoredDraft = items.map(it => ({
+      id: `sq-${it.id || Date.now()}-${Math.random().toString(36).slice(2)}`,
+      originalName: it.item_name,
+      originalSpec: it.description || '',
+      quantity: it.qty,
+      unit: it.unit,
+      targetUnitPrice: it.supplier_cost,
+      targetTotal: it.supplier_cost * it.qty,
+      confidence: 1,
+      status: 'Confirmed' as const,
+      suggestedCategory: FurnitureCategory.OTHER,
+    }));
+
+    const newCurrencies: Record<string, string> = {};
+    const newNotes: Record<string, string> = {};
+    restoredDraft.forEach((d, i) => {
+      newCurrencies[d.id] = items[i]?.currency || 'AED';
+      newNotes[d.id] = items[i]?.notes || '';
+    });
+
+    setDraftItems(restoredDraft);
+    setTradeItemCurrencies(newCurrencies);
+    setTradeItemNotes(newNotes);
+    setTradeTerms(result.quote.terms_notes || '');
+    setSellingPrices({});
+    setMarkupPercents({});
+    setQuoteGenerated(false);
+    setSentToTrade(false);
+
+    // Navigate to pricing flow
+    setQuoteType('trade');
+    setQuoteMode('package');
+    setTradePhase('pricing');
+    setProjectInfoSubmitted(true);
+    setView('configurator');
   };
 
   // Handle 3-path type selection (Step 2)
@@ -3562,6 +3668,23 @@ Return ONLY valid JSON:
             </div>
           </div>
 
+          {/* Action buttons: Save to Archive OR Proceed to Pricing */}
+          <div className="flex flex-col sm:flex-row gap-3 justify-end items-center">
+            {/* Save to Supplier Archive */}
+            <button
+              onClick={handleSaveSupplierQuote}
+              disabled={draftItems.length === 0 || sqSaveStatus === 'saving'}
+              className="px-6 py-4 rounded-full text-[11px] font-black uppercase tracking-widest border transition-all active:scale-95 disabled:opacity-40 flex items-center gap-2"
+              style={sqSaveStatus === 'saved'
+                ? { borderColor: '#10B981', color: '#10B981', backgroundColor: '#10B98110' }
+                : { borderColor: '#0C1B3A30', color: '#0C1B3A60', backgroundColor: 'white' }
+              }
+            >
+              <Archive className="w-4 h-4" />
+              {sqSaveStatus === 'saving' ? 'Saving…' : sqSaveStatus === 'saved' ? '✓ Saved to Archive' : 'Save to Supplier Archive'}
+            </button>
+          </div>
+
           {/* Proceed to Pricing button */}
           <div className="flex justify-end">
             <button
@@ -5578,13 +5701,97 @@ Return ONLY valid JSON:
         <main className="bg-white rounded-[56px] shadow-[0_45px_120px_-30px_rgba(62,39,35,0.08)] border border-brand-beige overflow-hidden">
           <div className="p-8 sm:p-20 min-h-[650px] flex flex-col">
             {view === 'history' ? (
-              <div className="space-y-10">
-                {/* Header */}
-                <div className="text-center space-y-2">
-                  <h2 className="text-3xl font-serif italic text-brand-brown">Quotation History</h2>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">All saved quotes · Click to open &amp; continue</p>
+              <div className="space-y-8">
+                {/* Header + Tab Switcher */}
+                <div className="space-y-4">
+                  <div className="text-center space-y-2">
+                    <h2 className="text-3xl font-serif italic text-brand-brown">History Center</h2>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Supplier Quotes Archive · GCI Customer Quotes</p>
+                  </div>
+                  {/* Tab switcher */}
+                  <div className="flex justify-center">
+                    <div className="flex bg-[#0C1B3A]/5 p-1 rounded-2xl gap-1">
+                      <button
+                        onClick={() => setHistoryTab('supplier')}
+                        className="px-6 py-2.5 rounded-xl text-[12px] font-black uppercase tracking-wider transition-all"
+                        style={historyTab === 'supplier'
+                          ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
+                          : { color: '#0C1B3A60' }}
+                      >
+                        Supplier Quotes
+                      </button>
+                      <button
+                        onClick={() => setHistoryTab('gci')}
+                        className="px-6 py-2.5 rounded-xl text-[12px] font-black uppercase tracking-wider transition-all"
+                        style={historyTab === 'gci'
+                          ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
+                          : { color: '#0C1B3A60' }}
+                      >
+                        GCI Quotes
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
+                {/* ── Supplier Quotes Tab ──────────────────────────────── */}
+                {historyTab === 'supplier' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">Supplier Quote Archive</span>
+                      <div className="h-px flex-1 bg-[#0C1B3A]/10" />
+                      {supplierQuotesLoading && <RefreshCw className="w-3.5 h-3.5 text-[#C9A84C] animate-spin" />}
+                      <span className="text-[9px] text-[#0C1B3A]/30 font-bold uppercase">Cloud · Supabase</span>
+                    </div>
+                    {!supplierQuotesLoading && supplierQuotes.length === 0 && (
+                      <div className="text-center py-12 border-2 border-dashed border-[#0C1B3A]/8 rounded-[28px] text-[#0C1B3A]/30">
+                        <p className="text-sm font-serif italic">No supplier quotes saved yet</p>
+                        <p className="text-[11px] mt-1">Upload a supplier quote → review costs → click "Save to Supplier Archive"</p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 gap-3">
+                      {supplierQuotes.map(sq => {
+                        const statusColor = sq.status === 'Converted' ? 'bg-green-100 text-green-700'
+                          : sq.status === 'Expired' ? 'bg-red-100 text-red-600'
+                          : sq.status === 'Archived' ? 'bg-slate-100 text-slate-500'
+                          : 'bg-[#C9A84C]/15 text-[#A07C2D]';
+                        return (
+                          <div key={sq.id} className="p-5 bg-white border border-[#0C1B3A]/8 rounded-[24px] flex items-center gap-5 hover:border-[#C9A84C]/40 transition-all group">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${statusColor}`}>{sq.status}</span>
+                                {sq.supplier_quote_no && <span className="text-[9px] font-mono text-[#0C1B3A]/40">{sq.supplier_quote_no}</span>}
+                              </div>
+                              <h3 className="text-base font-black text-[#0C1B3A] truncate">{sq.supplier_name || '(Unnamed Supplier)'}</h3>
+                              <p className="text-[11px] text-[#0C1B3A]/40 mt-0.5">{sq.quote_date} · {sq.currency}</p>
+                              {sq.terms_notes && <p className="text-[10px] text-[#0C1B3A]/30 mt-0.5 truncate">{sq.terms_notes.slice(0, 60)}</p>}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30">Total Cost</p>
+                              <p className="text-lg font-black font-mono text-[#0C1B3A]">{sq.currency} {(sq.total_cost || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+                            </div>
+                            {sq.status !== 'Converted' && (
+                              <button
+                                onClick={() => handleCreateGCIQuoteFromSupplier(sq)}
+                                className="shrink-0 px-4 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider border border-[#C9A84C]/30 text-[#C9A84C] bg-[#0C1B3A] hover:bg-[#0F2551] transition-all active:scale-95"
+                              >
+                                Create GCI Quote
+                              </button>
+                            )}
+                            {sq.status === 'Converted' && (
+                              <div className="shrink-0 px-4 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider text-green-600 bg-green-50">
+                                ✓ Converted
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── GCI Quotes Tab ───────────────────────────────────── */}
+                {historyTab === 'gci' && (
+                <div className="space-y-8">
                 {/* ── Section 1: Cloud Trade/BOQ Quotes ───────────────── */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
@@ -5660,6 +5867,8 @@ Return ONLY valid JSON:
                       ))}
                     </div>
                   </div>
+                )}
+                </div>
                 )}
               </div>
             ) : !projectInfoSubmitted ? (
