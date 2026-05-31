@@ -57,6 +57,9 @@ import {
   FileSearch
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
+
+/** Single Gemini model used for ALL AI analysis (text / image / PDF / classification). */
+const GEMINI_MODEL = "gemini-3-flash-preview";
 import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
@@ -1923,7 +1926,7 @@ Return ONLY valid JSON:
       let response: any;
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-preview-04-17', // matches working model on this key
+          model: GEMINI_MODEL,
           contents: [{
             role: 'user',
             parts: [
@@ -2181,7 +2184,7 @@ Return ONLY valid JSON:
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-04-17", // same as working text model
+        model: GEMINI_MODEL,
         contents: [
           { role: 'user', parts: [
             { text: prompt },
@@ -2252,7 +2255,7 @@ Return ONLY valid JSON:
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
@@ -2318,7 +2321,7 @@ Return ONLY valid JSON:
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
