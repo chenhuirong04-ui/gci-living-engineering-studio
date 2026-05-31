@@ -1933,6 +1933,8 @@ export default function App() {
         If no terms found, set terms to "". If no items found, set items to [].
       `;
 
+      // PDF + responseMimeType:'application/json' causes Gemini to throw.
+      // Omit responseMimeType — prompt asks for JSON, extract it from raw text.
       const response = await ai.models.generateContent({
         model: 'gemini-1.5-flash',
         contents: [
@@ -1944,10 +1946,13 @@ export default function App() {
             ],
           },
         ],
-        config: { responseMimeType: 'application/json' },
+        // NO responseMimeType here — that combination throws with PDF input
       });
 
-      const parsed = JSON.parse(response.text || '{}');
+      const rawText = response.text || '';
+      // Extract the first JSON object from the response text
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
       const extractedTerms: string = parsed.terms || '';
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
