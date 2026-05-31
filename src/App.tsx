@@ -61,6 +61,7 @@ import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
 import { TypeSelection, QuoteType } from './components/TypeSelection';
+import { saveQuotation, updateQuotation, loadByQuoteNo, markSentToTrade, QuotationItem } from './lib/quotationCloud';
 import { 
   BedSize, 
   SIZE_DIMENSIONS,
@@ -223,6 +224,11 @@ export default function App() {
   const [tradeItemCurrencies, setTradeItemCurrencies] = useState<Record<string, string>>({});
   const [quoteGenerated, setQuoteGenerated] = useState(false);
   const [tradeTerms, setTradeTerms] = useState<string>(''); // extracted terms / notes from supplier quote
+  // Cloud save state
+  const [cloudId, setCloudId] = useState<string | null>(null);          // UUID after first save
+  const [cloudSaveStatus, setCloudSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [loadQuoteNo, setLoadQuoteNo] = useState<string>('');
+  const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -450,6 +456,8 @@ export default function App() {
     setTradeItemCurrencies({});
     setQuoteGenerated(false);
     setTradeTerms('');
+    setCloudId(null);
+    setCloudSaveStatus('idle');
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -552,6 +560,171 @@ export default function App() {
     setQuoteHistory(updated);
     localStorage.setItem('gci_quote_history', JSON.stringify(updated));
     alert('报价已保存至历史记录 Saved to history');
+  };
+
+  // ── Cloud Save / Load ────────────────────────────────────────────────────
+
+  /** Build the Supabase payload from current quote state (trade/BOQ path). */
+  const buildCloudPayload = (confirmed: typeof draftItems, totals: {
+    totalSupplierCost: number; totalSelling: number; totalProfit: number;
+    overallMargin: number; totalVAT: number; grandTotal: number;
+  }) => {
+    const quoteNo = quoteInfo.quoteNumber || `GCI-${Date.now()}`;
+    const record = {
+      quote_no: quoteNo,
+      customer_name: quoteInfo.customerProjectName || '',
+      project_name: quoteInfo.customerProjectName || '',
+      deal_id: _businessIdParam || undefined,
+      salesperson: quoteInfo.salesperson || '',
+      phone_wa: quoteInfo.phoneWhatsApp || '',
+      quote_type: (quoteType === 'boq' ? 'BOQ' : 'TRADE') as 'TRADE' | 'BOQ',
+      status: quoteGenerated ? 'GENERATED' : 'DRAFT' as 'DRAFT' | 'GENERATED',
+      source: _businessIdParam ? 'DEAL' : 'Manual',
+      supplier_cost_total: Number(totals.totalSupplierCost.toFixed(2)),
+      selling_total: Number(totals.totalSelling.toFixed(2)),
+      profit_total: Number(totals.totalProfit.toFixed(2)),
+      margin_percent: Number(totals.overallMargin.toFixed(2)),
+      vat_amount: Number(totals.totalVAT.toFixed(2)),
+      grand_total: Number(totals.grandTotal.toFixed(2)),
+      terms_notes: tradeTerms || undefined,
+      created_by: 'Admin',
+      quote_date: quoteInfo.date || new Date().toISOString().split('T')[0],
+    };
+    const items: QuotationItem[] = confirmed.map((item, i) => {
+      const sp = sellingPrices[item.id] || 0;
+      const sub = sp * item.quantity;
+      const supp = item.targetUnitPrice * item.quantity;
+      const profit = sub - supp;
+      const margin = supp > 0 ? (profit / supp) * 100 : 0;
+      const vat = sub * 0.05;
+      return {
+        item_name: item.originalName,
+        description: item.originalSpec || '',
+        qty: item.quantity,
+        unit: item.unit,
+        supplier_cost: Number(item.targetUnitPrice.toFixed(2)),
+        selling_price: Number(sp.toFixed(2)),
+        profit_amount: Number(profit.toFixed(2)),
+        margin_percent: Number(margin.toFixed(2)),
+        vat_amount: Number(vat.toFixed(2)),
+        line_total: Number((sub + vat).toFixed(2)),
+        currency: tradeItemCurrencies[item.id] || 'AED',
+        item_notes: tradeItemNotes[item.id] || '',
+        sort_order: i,
+      };
+    });
+    return { record, items };
+  };
+
+  /** Save or update quotation to cloud. */
+  const handleSaveToCloud = async (confirmed: typeof draftItems, totals: {
+    totalSupplierCost: number; totalSelling: number; totalProfit: number;
+    overallMargin: number; totalVAT: number; grandTotal: number;
+  }) => {
+    setCloudSaveStatus('saving');
+    try {
+      const payload = buildCloudPayload(confirmed, totals);
+      let id: string | null = null;
+      if (cloudId) {
+        const ok = await updateQuotation(cloudId, payload);
+        id = ok ? cloudId : null;
+      } else {
+        id = await saveQuotation(payload);
+      }
+      if (id) {
+        setCloudId(id);
+        setCloudSaveStatus('saved');
+        // Update quoteNumber in quoteInfo if not set
+        if (!quoteInfo.quoteNumber) {
+          setQuoteInfo(prev => ({ ...prev, quoteNumber: payload.record.quote_no }));
+        }
+      } else {
+        setCloudSaveStatus('error');
+      }
+    } catch (e) {
+      console.error('[Cloud Save] Error:', e);
+      setCloudSaveStatus('error');
+    }
+  };
+
+  /** Load a quotation from cloud by quote_no and restore all state. */
+  const handleLoadDraft = async () => {
+    const qNo = loadQuoteNo.trim();
+    if (!qNo) return;
+    setLoadStatus('loading');
+    try {
+      const result = await loadByQuoteNo(qNo);
+      if (!result) { setLoadStatus('error'); return; }
+
+      const { record, items } = result;
+
+      // Restore quoteInfo
+      setQuoteInfo({
+        customerProjectName: record.customer_name || '',
+        phoneWhatsApp: record.phone_wa || '',
+        salesperson: record.salesperson || '',
+        quoteNumber: record.quote_no,
+        date: record.quote_date || new Date().toISOString().split('T')[0],
+      });
+
+      // Restore draftItems from saved items
+      const restoredDraftItems = items.map(it => ({
+        id: `cloud-${it.id || Date.now()}-${Math.random().toString(36).slice(2)}`,
+        originalName: it.item_name,
+        originalSpec: it.description || '',
+        quantity: it.qty,
+        unit: it.unit,
+        targetUnitPrice: it.supplier_cost,
+        targetTotal: it.supplier_cost * it.qty,
+        confidence: 1,
+        status: 'Confirmed' as const,
+        suggestedCategory: FurnitureCategory.OTHER,
+      }));
+
+      // Restore selling prices & extras keyed by NEW draft ids
+      const newSelling: Record<string, number> = {};
+      const newMarkup: Record<string, number> = {};
+      const newCurrency: Record<string, string> = {};
+      const newNotes: Record<string, string> = {};
+      restoredDraftItems.forEach((draft, i) => {
+        const src = items[i];
+        if (!src) return;
+        newSelling[draft.id] = src.selling_price;
+        newMarkup[draft.id] = src.supplier_cost > 0
+          ? Number(((src.selling_price / src.supplier_cost - 1) * 100).toFixed(1)) : 0;
+        newCurrency[draft.id] = src.currency || 'AED';
+        newNotes[draft.id] = src.item_notes || '';
+      });
+
+      setDraftItems(restoredDraftItems);
+      setSellingPrices(newSelling);
+      setMarkupPercents(newMarkup);
+      setTradeItemCurrencies(newCurrency);
+      setTradeItemNotes(newNotes);
+      setTradeTerms(record.terms_notes || '');
+      setCloudId(record.id || null);
+      setCloudSaveStatus('saved');
+
+      // Navigate into the trade flow
+      const qt: QuoteType = record.quote_type === 'BOQ' ? 'boq' : 'trade';
+      setQuoteType(qt);
+      setQuoteMode('package');
+      setActiveTab('draft');
+      setTradePhase('upload');
+      setProjectInfoSubmitted(true);
+
+      // If already generated, go to pricing
+      if (record.status === 'GENERATED' || record.status === 'SENT_TO_TRADE') {
+        setQuoteGenerated(true);
+        setTradePhase('pricing');
+      }
+
+      setLoadStatus('idle');
+      setLoadQuoteNo('');
+    } catch (e) {
+      console.error('[Cloud Load] Error:', e);
+      setLoadStatus('error');
+    }
   };
 
   // Handle 3-path type selection (Step 2)
@@ -2242,6 +2415,40 @@ export default function App() {
               </div>
             </button>
           </div>
+
+          {/* ── Load Existing Draft ─────────────────────────────────────── */}
+          <div className="mt-6 pt-6 border-t border-brand-beige/60">
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-brown/40 text-center mb-4">
+              Or load an existing cloud draft
+            </p>
+            <div className="flex gap-3 max-w-md mx-auto">
+              <input
+                type="text"
+                value={loadQuoteNo}
+                onChange={e => { setLoadQuoteNo(e.target.value); setLoadStatus('idle'); }}
+                onKeyDown={e => e.key === 'Enter' && handleLoadDraft()}
+                placeholder="Enter Quote No  e.g. GCI-20250601-001"
+                className="flex-1 bg-transparent border-b-2 border-brand-beige text-base font-serif italic text-brand-brown focus:border-brand-gold outline-none pb-2 placeholder:text-brand-brown/20"
+              />
+              <button
+                onClick={handleLoadDraft}
+                disabled={!loadQuoteNo.trim() || loadStatus === 'loading'}
+                className="px-5 py-2 bg-[#0C1B3A] text-[#C9A84C] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#0F2551] transition-all disabled:opacity-40 flex items-center gap-2"
+              >
+                {loadStatus === 'loading' ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+                Load
+              </button>
+            </div>
+            {loadStatus === 'error' && (
+              <p className="text-center text-xs text-red-400 font-bold mt-3">
+                ⚠ Quote not found — check the quote number and try again
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -2284,6 +2491,8 @@ export default function App() {
       };
       const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
       window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
+      // Mark cloud record as sent (fire-and-forget, best effort)
+      if (cloudId) markSentToTrade(cloudId);
     };
 
     return (
@@ -2490,7 +2699,32 @@ export default function App() {
                 </div>
                 <h3 className="text-xl font-black text-[#0C1B3A]">GCI Customer Quote</h3>
               </div>
-              <button onClick={() => setQuoteGenerated(false)} className="text-[9px] text-[#0C1B3A]/30 hover:text-[#0C1B3A] uppercase tracking-widest font-bold transition-colors">← Edit Prices</button>
+              <div className="flex items-center gap-3">
+                {/* Cloud save status indicator */}
+                {cloudSaveStatus === 'saved' && cloudId && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50 border border-green-200 rounded-full">
+                    <CheckCircle2 className="w-3 h-3 text-green-500" />
+                    <span className="text-[9px] font-black text-green-600 uppercase tracking-widest">Saved · {quoteInfo.quoteNumber}</span>
+                  </div>
+                )}
+                {cloudSaveStatus === 'saving' && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-[#0C1B3A]/5 rounded-full">
+                    <RefreshCw className="w-3 h-3 text-[#C9A84C] animate-spin" />
+                    <span className="text-[9px] font-black text-[#0C1B3A]/50 uppercase tracking-widest">Saving…</span>
+                  </div>
+                )}
+                {cloudSaveStatus === 'error' && (
+                  <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Save failed</span>
+                )}
+                <button
+                  onClick={() => handleSaveToCloud(confirmed, { totalSupplierCost, totalSelling, totalProfit, overallMargin, totalVAT, grandTotal })}
+                  disabled={cloudSaveStatus === 'saving'}
+                  className="px-4 py-2 bg-[#0C1B3A] text-[#C9A84C] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#0F2551] transition-all disabled:opacity-40 flex items-center gap-1.5 border border-[#C9A84C]/30"
+                >
+                  {cloudId ? '↑ Update Draft' : '💾 Save Draft'}
+                </button>
+                <button onClick={() => setQuoteGenerated(false)} className="text-[9px] text-[#0C1B3A]/30 hover:text-[#0C1B3A] uppercase tracking-widest font-bold transition-colors">← Edit Prices</button>
+              </div>
             </div>
 
             {/* Quote info card */}
