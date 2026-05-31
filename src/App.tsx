@@ -1923,7 +1923,7 @@ Return ONLY valid JSON:
       let response: any;
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',   // gemini-1.5-flash removed from v1beta
+          model: 'gemini-2.5-flash-preview-04-17', // matches working model on this key
           contents: [{
             role: 'user',
             parts: [
@@ -2181,7 +2181,7 @@ Return ONLY valid JSON:
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash", // gemini-1.5-flash not available in v1beta SDK
+        model: "gemini-2.5-flash-preview-04-17", // same as working text model
         contents: [
           { role: 'user', parts: [
             { text: prompt },
