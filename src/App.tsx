@@ -607,8 +607,8 @@ export default function App() {
       quote_date: quoteInfo.date || new Date().toISOString().split('T')[0],
     };
     const items: QuotationItem[] = confirmed.map((item, i) => {
-      const sp = sellingPrices[item.id] || 0;
-      const sub = sp * item.quantity;
+      const sp = sellingPrices[item.id] || 0;  // line total
+      const sub = sp;                            // already line total, no * qty
       const supp = item.targetUnitPrice * item.quantity;
       const profit = sub - supp;
       const margin = supp > 0 ? (profit / supp) * 100 : 0;
@@ -1067,14 +1067,15 @@ export default function App() {
     doc.setTextColor(30, 30, 30);
     items.forEach((item) => {
       if (y > 260) { doc.addPage(); y = 20; }
-      const sp = sellingPrices[item.id] || 0;
-      const lineTot = sp * item.quantity;
+      const sp = sellingPrices[item.id] || 0;  // line total
+      const lineTot = sp;                        // already line total
+      const unitSellPrice = item.quantity > 0 ? sp / item.quantity : 0;
       doc.setFontSize(8.5);
       const nameLines = doc.splitTextToSize(item.originalName + (item.originalSpec ? `\n${item.originalSpec}` : ''), colWidths[0] - 2);
       doc.text(nameLines, colX[0] + 1, y + 4);
       doc.text(String(item.quantity), colX[1] + colWidths[1] - 2, y + 4, { align: 'right' });
       doc.text(item.unit, colX[2] + 1, y + 4);
-      doc.text(sp.toFixed(2), colX[3] + colWidths[3] - 2, y + 4, { align: 'right' });
+      doc.text(unitSellPrice.toFixed(2), colX[3] + colWidths[3] - 2, y + 4, { align: 'right' });
       doc.text(lineTot.toFixed(2), colX[4] + colWidths[4] - 2, y + 4, { align: 'right' });
       const rowH = Math.max(7, nameLines.length * 4.5 + 3);
       doc.setDrawColor(220, 220, 220);
@@ -2541,7 +2542,8 @@ Return ONLY valid JSON:
     const confirmed = draftItems.filter(it => it.status === 'Confirmed');
     const totalSupplierCost = confirmed.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
     console.log('[Pricing View] Confirmed items:', confirmed.length, '| Supplier Total:', totalSupplierCost.toFixed(2));
-    const totalSelling = confirmed.reduce((s, it) => s + (sellingPrices[it.id] || 0) * it.quantity, 0);
+    // sellingPrices[id] = LINE TOTAL (not unit price). No * quantity needed.
+    const totalSelling = confirmed.reduce((s, it) => s + (sellingPrices[it.id] || 0), 0);
     const totalProfit = totalSelling - totalSupplierCost;
     const overallMargin = totalSupplierCost > 0 ? (totalProfit / totalSupplierCost) * 100 : 0;
     const totalVAT = totalSelling * 0.05;
@@ -2565,8 +2567,9 @@ Return ONLY valid JSON:
         items: confirmed.map(it => ({
           desc: `${it.originalName}${it.originalSpec ? ` (${it.originalSpec})` : ''}`,
           qty: it.quantity,
-          unitPrice: Number((sellingPrices[it.id] || 0).toFixed(2)),
-          lineTotal: Number(((sellingPrices[it.id] || 0) * it.quantity).toFixed(2)),
+          // sellingPrices[id] is line total; TRADE expects unit price
+          unitPrice: it.quantity > 0 ? Number(((sellingPrices[it.id] || 0) / it.quantity).toFixed(2)) : 0,
+          lineTotal: Number((sellingPrices[it.id] || 0).toFixed(2)),
         })),
         sourceApp: 'gci-living-engineering-studio',
         piType: 'PROJECT',
@@ -2641,7 +2644,7 @@ Return ONLY valid JSON:
             <div className="col-span-3">Item</div>
             <div className="col-span-1 text-right">Qty</div>
             <div className="col-span-2 text-right">Supplier Cost</div>
-            <div className="col-span-2 text-right">Selling Price ✎</div>
+            <div className="col-span-2 text-right">Selling Total ✎</div>
             <div className="col-span-1 text-right">Markup%</div>
             <div className="col-span-1 text-right">Profit</div>
             <div className="col-span-1 text-right">Margin%</div>
@@ -2653,23 +2656,26 @@ Return ONLY valid JSON:
             {confirmed.map(item => {
               const supplierUnit = item.targetUnitPrice;
               const supplierTotal = supplierUnit * item.quantity;
-              const sellPrice = sellingPrices[item.id] || 0;
+              // sellingPrices[id] = LINE TOTAL selling price (e.g. 43450 for 50×790 bed)
+              const sellPrice = sellingPrices[item.id] || 0;          // line total
               const markupPct = markupPercents[item.id] || 0;
-              const lineSellingTotal = sellPrice * item.quantity;
+              const lineSellingTotal = sellPrice;                       // already line total
               const lineProfit = lineSellingTotal - supplierTotal;
               const lineMargin = supplierTotal > 0 ? (lineProfit / supplierTotal) * 100 : 0;
               const lineVAT = lineSellingTotal * 0.05;
               const lineTotal = lineSellingTotal + lineVAT;
               const isProfit = lineProfit > 0;
+              // Rule A: user enters Selling Total → calc Markup%
               const handleSellChange = (val: number) => {
                 setSellingPrices(prev => ({ ...prev, [item.id]: val }));
-                if (supplierUnit > 0 && val > 0)
-                  setMarkupPercents(prev => ({ ...prev, [item.id]: Number(((val / supplierUnit - 1) * 100).toFixed(1)) }));
+                if (supplierTotal > 0 && val > 0)
+                  setMarkupPercents(prev => ({ ...prev, [item.id]: Number(((val / supplierTotal - 1) * 100).toFixed(1)) }));
               };
+              // Rule B: user enters Markup% → calc Selling Total
               const handleMarkupChange = (pct: number) => {
                 setMarkupPercents(prev => ({ ...prev, [item.id]: pct }));
-                if (supplierUnit > 0)
-                  setSellingPrices(prev => ({ ...prev, [item.id]: Number((supplierUnit * (1 + pct / 100)).toFixed(2)) }));
+                if (supplierTotal > 0)
+                  setSellingPrices(prev => ({ ...prev, [item.id]: Number((supplierTotal * (1 + pct / 100)).toFixed(2)) }));
               };
               return (
                 <div key={item.id} className="grid grid-cols-12 gap-2 px-6 py-4 items-center hover:bg-[#0C1B3A]/2 transition-colors">
@@ -2857,8 +2863,9 @@ Return ONLY valid JSON:
               </div>
               <div className="divide-y divide-[#0C1B3A]/5">
                 {confirmed.map(item => {
-                  const sp = sellingPrices[item.id] || 0;
-                  const sub = sp * item.quantity;
+                  const sp = sellingPrices[item.id] || 0;  // line total
+                  const sub = sp;                            // already line total
+                  const unitSell = item.quantity > 0 ? sp / item.quantity : 0;
                   const vat = sub * 0.05;
                   return (
                     <div key={item.id} className="grid grid-cols-12 gap-2 px-5 py-3 items-center">
@@ -2867,7 +2874,7 @@ Return ONLY valid JSON:
                         {item.originalSpec && <p className="text-[9px] text-[#0C1B3A]/40">{item.originalSpec}</p>}
                       </div>
                       <div className="col-span-1 text-center text-[10px] font-mono text-[#0C1B3A]">{item.quantity}</div>
-                      <div className="col-span-2 text-right text-[10px] font-mono text-[#0C1B3A]">{sp.toFixed(2)}</div>
+                      <div className="col-span-2 text-right text-[10px] font-mono text-[#0C1B3A]">{unitSell.toFixed(2)}</div>
                       <div className="col-span-2 text-right text-[10px] font-mono text-[#0C1B3A]">{sub.toFixed(2)}</div>
                       <div className="col-span-1 text-right text-[9px] font-mono text-[#0C1B3A]/40">{vat.toFixed(2)}</div>
                       <div className="col-span-1 text-right text-[10px] font-black font-mono text-[#0C1B3A]">{(sub + vat).toFixed(2)}</div>
