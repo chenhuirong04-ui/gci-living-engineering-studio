@@ -210,6 +210,13 @@ export default function App() {
   const [prices, setPrices] = useState<MaterialPrices>(DEFAULT_PRICES);
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
+  // Top-level app mode — controls homepage entry point
+  const [appMode, setAppMode] = useState<'landing' | 'customer-quote' | 'supplier-quote'>('landing');
+  // Supplier Quote metadata form
+  const [supplierMeta, setSupplierMeta] = useState({
+    supplierName: '', supplierContact: '', category: '', currency: 'AED',
+    quoteDate: new Date().toISOString().split('T')[0], validUntil: '',
+  });
   // Read URL params injected by DEAL (client, project, salesperson, businessId, returnUrl, quoteType, phone)
   const _urlParams = new URLSearchParams(window.location.search);
   const _clientParam = _urlParams.get('client') || '';
@@ -499,6 +506,7 @@ export default function App() {
     setCloudId(null);
     setSqSaveStatus('idle');
     setCloudSaveStatus('idle');
+    setAppMode('landing');
     setPackageItems([]);
     setCurrentStep(0);
     setCostOverrides({
@@ -769,6 +777,250 @@ export default function App() {
     }
   };
 
+  // ── Supplier Quote Upload flow ───────────────────────────────────────────
+  const renderSupplierQuoteUpload = () => (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest flex-wrap">
+        <button onClick={() => { setAppMode('landing'); setDraftItems([]); setTradeTerms(''); }} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+          Home
+        </button>
+        <span className="text-[#0C1B3A]/15">›</span>
+        <span className="text-[#C9A84C]">Save Supplier Quote</span>
+      </div>
+
+      {/* Supplier Metadata Form */}
+      <div className="bg-white rounded-[28px] border border-[#0C1B3A]/8 p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#0C1B3A' }}>
+            <Archive className="w-4 h-4 text-[#C9A84C]" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-[#0C1B3A]">Supplier Information</h3>
+            <p className="text-[11px] text-[#0C1B3A]/40">供应商信息 · 可选填，保存后可在 Archive 编辑</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[
+            { key: 'supplierName', label: 'Supplier Name 供应商名称', placeholder: 'e.g. ABC Trading Co.' },
+            { key: 'supplierContact', label: 'Contact 联系人', placeholder: 'Name / WhatsApp / Email' },
+            { key: 'category', label: 'Category 品类', placeholder: 'Furniture / Tissue / Building...' },
+          ].map(f => (
+            <div key={f.key}>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">{f.label}</label>
+              <input
+                type="text"
+                value={(supplierMeta as any)[f.key]}
+                placeholder={f.placeholder}
+                onChange={e => setSupplierMeta(prev => ({ ...prev, [f.key]: e.target.value }))}
+                className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+              />
+            </div>
+          ))}
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Currency 币种</label>
+            <select
+              value={supplierMeta.currency}
+              onChange={e => setSupplierMeta(prev => ({ ...prev, currency: e.target.value }))}
+              className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+            >
+              {['AED','USD','CNY','EUR','GBP'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Quote Date 报价日期</label>
+            <input
+              type="date"
+              value={supplierMeta.quoteDate}
+              onChange={e => setSupplierMeta(prev => ({ ...prev, quoteDate: e.target.value }))}
+              className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Valid Until 有效期</label>
+            <input
+              type="date"
+              value={supplierMeta.validUntil}
+              onChange={e => setSupplierMeta(prev => ({ ...prev, validUntil: e.target.value }))}
+              className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Upload + AI Parse section (reuse renderPackageWorkspace upload zone via shared state) */}
+      <div className="bg-white rounded-[28px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-[#0C1B3A]/6 flex items-center gap-3">
+          <Cpu className="w-5 h-5 text-[#C9A84C]" />
+          <div>
+            <h3 className="text-[13px] font-black uppercase tracking-widest text-[#0C1B3A]">Supplier Quote Import</h3>
+            <p className="text-[11px] text-[#0C1B3A]/40 mt-0.5">Upload PDF/Excel/Image or paste text — AI extracts cost items</p>
+          </div>
+        </div>
+        <div className="p-6 space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Text paste */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 flex items-center gap-2">
+                <Clipboard className="w-3.5 h-3.5" /> Paste supplier quote text
+              </label>
+              <textarea
+                value={importText}
+                onChange={e => setImportText(e.target.value)}
+                placeholder="Paste supplier quote content here..."
+                className="w-full h-44 p-5 bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[20px] text-[13px] text-[#0C1B3A] placeholder:text-[#0C1B3A]/25 resize-none outline-none focus:border-[#C9A84C] transition-colors"
+              />
+            </div>
+            {/* File upload */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 flex items-center gap-2">
+                <Upload className="w-3.5 h-3.5" /> Upload file
+              </label>
+              <div
+                onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => { e.preventDefault(); setIsDragging(false); handleFileUpload({ target: { files: e.dataTransfer.files } } as any); }}
+                onClick={() => document.getElementById('sq-file-upload')?.click()}
+                className={`h-44 rounded-[20px] border-4 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all ${isDragging ? 'border-[#C9A84C] bg-[#C9A84C]/5' : 'border-[#0C1B3A]/10 hover:border-[#C9A84C]/40'}`}
+              >
+                <input id="sq-file-upload" type="file" className="hidden" accept=".xlsx,.csv,.pdf,image/*" onChange={handleFileUpload} />
+                {isProcessingAI
+                  ? <RefreshCw className="w-8 h-8 text-[#C9A84C] animate-spin" />
+                  : <Upload className="w-8 h-8 text-[#0C1B3A]/20" />
+                }
+                <p className="text-[12px] font-bold text-[#0C1B3A]/40 mt-3">Drag & drop or click</p>
+                <p className="text-[11px] text-[#0C1B3A]/25 mt-1">Excel, CSV, PDF, PNG, JPG</p>
+              </div>
+            </div>
+          </div>
+          {/* Analyze button */}
+          <button
+            onClick={importText.trim() ? handleAnalyze : undefined}
+            disabled={!importText.trim() || isProcessingAI}
+            className="w-full py-4 rounded-[20px] text-[13px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all"
+            style={importText.trim() && !isProcessingAI
+              ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
+              : { backgroundColor: '#0C1B3A10', color: '#0C1B3A30', cursor: 'not-allowed' }
+            }
+          >
+            <Cpu className="w-4 h-4" />
+            {isProcessingAI ? 'Analyzing Supplier Quote...' : 'Analyze Supplier Quote'}
+          </button>
+        </div>
+      </div>
+
+      {/* Supplier Cost Items (parsed result) */}
+      {draftItems.length > 0 && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">AI Parsed</span>
+              </div>
+              <h3 className="text-xl font-black text-[#0C1B3A]">Supplier Cost Items</h3>
+              <p className="text-[11px] text-[#0C1B3A]/50 mt-0.5">Review and correct before saving · {draftItems.length} items</p>
+            </div>
+          </div>
+          {/* Editable table — same structure as Trade & Sourcing */}
+          <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+            <div className="grid grid-cols-12 gap-3 px-6 py-3 bg-[#0C1B3A] text-white text-[10px] font-black uppercase tracking-wider">
+              <div className="col-span-4">Item Name</div>
+              <div className="col-span-3">Spec</div>
+              <div className="col-span-1 text-center">Qty</div>
+              <div className="col-span-1 text-center">Unit</div>
+              <div className="col-span-2 text-right">Unit Cost</div>
+              <div className="col-span-1 text-right">Total</div>
+            </div>
+            <div className="divide-y divide-[#0C1B3A]/6">
+              {draftItems.map((item, idx) => (
+                <div key={item.id} className="grid grid-cols-12 gap-3 px-6 py-3 items-center group">
+                  <div className="col-span-4">
+                    <input value={item.originalName}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalName: e.target.value } : it))}
+                      className="w-full text-[14px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1 transition-colors" />
+                  </div>
+                  <div className="col-span-3">
+                    <input value={item.originalSpec || ''} placeholder="—"
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalSpec: e.target.value } : it))}
+                      className="w-full text-[13px] text-[#0C1B3A]/55 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 transition-colors placeholder:text-[#0C1B3A]/20" />
+                  </div>
+                  <div className="col-span-1">
+                    <input type="number" min="0" value={item.quantity}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: Number(e.target.value)||1, targetTotal: (Number(e.target.value)||1) * it.targetUnitPrice } : it))}
+                      className="w-full text-[14px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
+                  </div>
+                  <div className="col-span-1">
+                    <input value={item.unit}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, unit: e.target.value } : it))}
+                      className="w-full text-[13px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1" />
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <input type="number" min="0" step="0.01" value={item.targetUnitPrice || ''} placeholder="0.00"
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value)||0, targetTotal: (Number(e.target.value)||0) * it.quantity } : it))}
+                      className="w-full text-right text-[14px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
+                  </div>
+                  <div className="col-span-1 text-right flex items-center justify-end gap-2">
+                    <p className="text-[14px] font-black font-mono text-[#0C1B3A]">{(item.targetUnitPrice * item.quantity).toFixed(2)}</p>
+                    <button onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
+                      className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
+              <button onClick={() => setDraftItems(prev => [...prev, { id: `sq-new-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER }])}
+                className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-2">
+                <Plus className="w-4 h-4" /> Add Item
+              </button>
+              <div className="text-right">
+                <p className="text-[11px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total Cost</p>
+                <p className="text-2xl font-black font-mono text-[#0C1B3A]">
+                  {supplierMeta.currency} {draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Terms */}
+          {tradeTerms && (
+            <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[16px] px-6 py-4">
+              <p className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 mb-2">Terms &amp; Notes (from AI)</p>
+              <p className="text-[13px] text-[#0C1B3A]/70 whitespace-pre-line">{tradeTerms}</p>
+            </div>
+          )}
+
+          {/* Save button */}
+          <div className="flex justify-end">
+            <button
+              onClick={async () => {
+                await handleSaveSupplierQuote();
+                // After save: go to History → Supplier Quotes tab
+                setTimeout(() => {
+                  setView('history');
+                  setHistoryTab('supplier');
+                  setDraftItems([]);
+                  setTradeTerms('');
+                  setAppMode('landing');
+                }, 800);
+              }}
+              disabled={draftItems.length === 0 || sqSaveStatus === 'saving'}
+              className="px-12 py-5 rounded-[24px] font-black uppercase tracking-widest text-[13px] transition-all active:scale-95 flex items-center gap-3 shadow-xl disabled:opacity-40"
+              style={sqSaveStatus === 'saved'
+                ? { backgroundColor: '#10B981', color: 'white' }
+                : { backgroundColor: '#0C1B3A', color: '#C9A84C', borderColor: '#C9A84C30' }
+              }
+            >
+              <Archive className="w-5 h-5" />
+              {sqSaveStatus === 'saving' ? 'Saving...' : sqSaveStatus === 'saved' ? '✓ Saved!' : 'Save Supplier Quote'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   // ── Supplier Quote Archive ────────────────────────────────────────────────
 
   /** Save current draftItems as a Supplier Quote (no GCI pricing required). */
@@ -779,11 +1031,14 @@ export default function App() {
       const totalCost = draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
       const header: SupplierQuote = {
         supplier_quote_no: generateSupplierQuoteNo(),
-        supplier_name: '',   // user can edit in archive
-        currency: 'AED',
-        quote_date: quoteInfo.date || new Date().toISOString().split('T')[0],
+        supplier_name: supplierMeta.supplierName || '',
+        supplier_contact: supplierMeta.supplierContact || '',
+        category: supplierMeta.category || '',
+        currency: supplierMeta.currency || 'AED',
+        quote_date: supplierMeta.quoteDate || quoteInfo.date || new Date().toISOString().split('T')[0],
+        valid_until: supplierMeta.validUntil || undefined,
         terms_notes: tradeTerms || undefined,
-        uploaded_by: quoteInfo.salesperson || 'Admin',
+        uploaded_by: 'Admin',
         status: 'Active',
         total_cost: Number(totalCost.toFixed(2)),
       };
@@ -5700,7 +5955,74 @@ Return ONLY valid JSON:
 
         <main className="bg-white rounded-[56px] shadow-[0_45px_120px_-30px_rgba(62,39,35,0.08)] border border-brand-beige overflow-hidden">
           <div className="p-8 sm:p-20 min-h-[650px] flex flex-col">
-            {view === 'history' ? (
+
+            {/* ── TOP-LEVEL: Landing / Supplier Upload / Customer Quote ── */}
+            {appMode === 'landing' && view !== 'history' ? (
+              /* ── Landing Page — 3 entry cards ──────────────────────── */
+              <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                <div className="text-center space-y-3">
+                  <h2 className="text-4xl font-serif italic text-[#0C1B3A]">GCI Supply Chain Center</h2>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.4em] text-[#C9A84C]">Choose your workflow</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                  {/* 1: Customer Quote */}
+                  <button onClick={() => setAppMode('customer-quote')}
+                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">For Clients</span>
+                      <FileText className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Create Customer Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">创建客户报价</p>
+                    </div>
+                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                      Generate GCI quotation for a client. Choose Custom Item, Trade & Sourcing, or BOQ path. Send to TRADE when done.
+                    </p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Start →</p>
+                  </button>
+
+                  {/* 2: Supplier Quote */}
+                  <button onClick={() => { setAppMode('supplier-quote'); setDraftItems([]); setTradeTerms(''); setSqSaveStatus('idle'); }}
+                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Archive</span>
+                      <Archive className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Save Supplier Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">保存供应商报价</p>
+                    </div>
+                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                      Upload supplier quote (PDF/Excel/image). AI extracts cost items. Save to Supplier Quote Archive. No client info required.
+                    </p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Save to Archive →</p>
+                  </button>
+
+                  {/* 3: History Center */}
+                  <button onClick={() => { setView('history'); setHistoryTab('supplier'); }}
+                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Records</span>
+                      <History className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">History Center</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">历史中心</p>
+                    </div>
+                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                      View Supplier Quotes archive and GCI Customer Quotes. Click any record to continue or convert.
+                    </p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Open →</p>
+                  </button>
+                </div>
+              </div>
+            ) : appMode === 'supplier-quote' && view !== 'history' ? (
+              renderSupplierQuoteUpload()
+            ) : (
+
+            /* ── Customer Quote flow + History (existing) ──────────── */
+            view === 'history' ? (
               <div className="space-y-8">
                 {/* Header + Tab Switcher */}
                 <div className="space-y-4">
@@ -5954,7 +6276,7 @@ Return ONLY valid JSON:
                   </div>
                 )}
               </>
-            )}
+            ))}
           </div>
         </main>
 
