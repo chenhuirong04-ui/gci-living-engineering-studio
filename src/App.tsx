@@ -206,21 +206,25 @@ export default function App() {
   const [prices, setPrices] = useState<MaterialPrices>(DEFAULT_PRICES);
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
-  // Read URL params injected by DEAL (client, project, salesperson, businessId, returnUrl)
+  // Read URL params injected by DEAL (client, project, salesperson, businessId, returnUrl, quoteType, phone)
   const _urlParams = new URLSearchParams(window.location.search);
   const _clientParam = _urlParams.get('client') || '';
   const _projectParam = _urlParams.get('project') || '';
   const _salespersonParam = _urlParams.get('salesperson') || '';
   const _businessIdParam = _urlParams.get('businessId') || '';
   const _returnUrlParam = _urlParams.get('returnUrl') || '';
+  const _phoneParam = _urlParams.get('phone') || '';
+  const _quoteTypeParam = (_urlParams.get('quoteType') || '').toUpperCase(); // 'TRADE' | 'BOQ' | ''
   const _prefillName = _clientParam && _projectParam
     ? `${_clientParam} - ${_projectParam}`
     : _clientParam || _projectParam;
+  // If DEAL passes quoteType=TRADE, auto-enter Trade & Sourcing without TypeSelection
+  const _autoTrade = _quoteTypeParam === 'TRADE';
 
-  const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(!!_prefillName);
-  const [quoteMode, setQuoteMode] = useState<'single' | 'package' | null>(null);
-  const [quoteType, setQuoteType] = useState<QuoteType | null>(null);
-  const [tradePhase, setTradePhase] = useState<'upload' | 'pricing' | null>(null);
+  const [projectInfoSubmitted, setProjectInfoSubmitted] = useState(!!_prefillName || _autoTrade);
+  const [quoteMode, setQuoteMode] = useState<'single' | 'package' | null>(_autoTrade ? 'package' : null);
+  const [quoteType, setQuoteType] = useState<QuoteType | null>(_autoTrade ? 'trade' : null);
+  const [tradePhase, setTradePhase] = useState<'upload' | 'pricing' | null>(_autoTrade ? 'upload' : null);
   const [sellingPrices, setSellingPrices] = useState<Record<string, number>>({});
   const [markupPercents, setMarkupPercents] = useState<Record<string, number>>({});
   const [tradeItemNotes, setTradeItemNotes] = useState<Record<string, string>>({});
@@ -240,7 +244,7 @@ export default function App() {
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
-  const [activeTab, setActiveTab] = useState<'items' | 'draft'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'draft'>(_autoTrade ? 'draft' : 'items');
   const [importText, setImportText] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [rawExcelData, setRawExcelData] = useState<any[][] | null>(null);
@@ -277,7 +281,7 @@ export default function App() {
 
   const [quoteInfo, setQuoteInfo] = useState({
     customerProjectName: _prefillName,
-    phoneWhatsApp: '',
+    phoneWhatsApp: _phoneParam,        // pre-filled from DEAL ?phone= param
     salesperson: _salespersonParam,
     quoteNumber: '',
     date: new Date().toISOString().split('T')[0]
