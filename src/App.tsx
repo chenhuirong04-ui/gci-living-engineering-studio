@@ -227,6 +227,8 @@ export default function App() {
   const [tradeItemCurrencies, setTradeItemCurrencies] = useState<Record<string, string>>({});
   const [quoteGenerated, setQuoteGenerated] = useState(false);
   const [tradeTerms, setTradeTerms] = useState<string>(''); // extracted terms / notes from supplier quote
+  const [sentToTrade, setSentToTrade] = useState(false);    // flow completion flag
+  const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
   // Cloud save state
   const [cloudId, setCloudId] = useState<string | null>(null);
   const [cloudSaveStatus, setCloudSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -472,6 +474,8 @@ export default function App() {
     setTradeItemCurrencies({});
     setQuoteGenerated(false);
     setTradeTerms('');
+    setSentToTrade(false);
+    setPdfDownloaded(false);
     setCloudId(null);
     setCloudSaveStatus('idle');
     setPackageItems([]);
@@ -2579,6 +2583,8 @@ Return ONLY valid JSON:
       window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
       // Mark cloud record as sent (fire-and-forget, best effort)
       if (cloudId) markSentToTrade(cloudId);
+      // Mark flow as complete
+      setSentToTrade(true);
     };
 
     return (
@@ -2896,21 +2902,91 @@ Return ONLY valid JSON:
               </div>
             )}
 
-            {/* Final action buttons */}
-            <div className="flex flex-col sm:flex-row gap-4 pt-2">
-              <button
-                onClick={() => generateTradePDF(confirmed, grandTotal, totalSelling, totalVAT, totalSupplierCost, totalProfit, overallMargin)}
-                className="flex-1 p-5 rounded-[24px] bg-white border-2 border-[#0C1B3A]/15 text-[#0C1B3A] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs hover:border-[#C9A84C] transition-all active:scale-95"
-              >
-                <Download className="w-4 h-4" /> Download PDF
-              </button>
-              <button
-                onClick={handleSendTradeToTrade}
-                className="flex-1 p-5 rounded-[24px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30"
-              >
-                <ExternalLink className="w-4 h-4" /> Send to TRADE
-              </button>
-            </div>
+            {sentToTrade ? (
+              /* ── Completion Panel ── */
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {/* All steps complete */}
+                <StepIndicator current={6} />
+
+                {/* Success message */}
+                <div className="bg-green-50 border border-green-200 rounded-[20px] p-6 text-center">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle2 className="w-6 h-6 text-green-600" />
+                  </div>
+                  <h3 className="text-base font-black text-green-800">Sent to TRADE successfully</h3>
+                  <p className="text-[13px] text-green-600 mt-1">已发送到 TRADE · Project PI 草稿已创建</p>
+                  {quoteInfo.quoteNumber && (
+                    <p className="text-[12px] text-green-500/70 mt-2 font-mono">{quoteInfo.quoteNumber}</p>
+                  )}
+                </div>
+
+                {/* Download PDF reminder */}
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => {
+                      generateTradePDF(confirmed, grandTotal, totalSelling, totalVAT, totalSupplierCost, totalProfit, overallMargin);
+                      setPdfDownloaded(true);
+                    }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-[#0C1B3A]/15 text-[#0C1B3A] text-[13px] font-bold hover:border-[#C9A84C] transition-all"
+                  >
+                    {pdfDownloaded
+                      ? <><CheckCircle2 className="w-4 h-4 text-green-500" /> PDF Downloaded</>
+                      : <><Download className="w-4 h-4" /> Download PDF</>
+                    }
+                  </button>
+                </div>
+
+                {/* 3 action buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    onClick={() => window.open('https://trade.globalcareinfo.com/?tab=quote', '_blank')}
+                    className="p-5 rounded-[20px] bg-[#0C1B3A] text-[#C9A84C] flex flex-col items-center gap-2 font-black text-[13px] uppercase tracking-wide hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30"
+                  >
+                    <ExternalLink className="w-5 h-5" />
+                    View in TRADE
+                    <span className="text-[11px] text-[#C9A84C]/60 normal-case font-bold tracking-normal">Open TRADE OS PI tab</span>
+                  </button>
+                  <button
+                    onClick={() => { setSentToTrade(false); setView('history'); }}
+                    className="p-5 rounded-[20px] bg-white border-2 border-[#0C1B3A]/12 text-[#0C1B3A] flex flex-col items-center gap-2 font-black text-[13px] uppercase tracking-wide hover:border-[#C9A84C] transition-all active:scale-95"
+                  >
+                    <History className="w-5 h-5" />
+                    Back to History
+                    <span className="text-[11px] text-[#0C1B3A]/40 normal-case font-bold tracking-normal">查看所有报价记录</span>
+                  </button>
+                  <button
+                    onClick={() => { resetProject(); }}
+                    className="p-5 rounded-[20px] bg-white border-2 border-[#0C1B3A]/12 text-[#0C1B3A] flex flex-col items-center gap-2 font-black text-[13px] uppercase tracking-wide hover:border-[#C9A84C] transition-all active:scale-95"
+                  >
+                    <PlusCircle className="w-5 h-5" />
+                    New Quote
+                    <span className="text-[11px] text-[#0C1B3A]/40 normal-case font-bold tracking-normal">新建报价</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ── Pre-send action buttons ── */
+              <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                <button
+                  onClick={() => {
+                    generateTradePDF(confirmed, grandTotal, totalSelling, totalVAT, totalSupplierCost, totalProfit, overallMargin);
+                    setPdfDownloaded(true);
+                  }}
+                  className="flex-1 p-5 rounded-[24px] bg-white border-2 border-[#0C1B3A]/15 text-[#0C1B3A] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs hover:border-[#C9A84C] transition-all active:scale-95"
+                >
+                  {pdfDownloaded
+                    ? <><CheckCircle2 className="w-4 h-4 text-green-500" /> PDF Downloaded</>
+                    : <><Download className="w-4 h-4" /> Download PDF</>
+                  }
+                </button>
+                <button
+                  onClick={handleSendTradeToTrade}
+                  className="flex-1 p-5 rounded-[24px] bg-[#0C1B3A] text-[#C9A84C] flex justify-center items-center gap-3 font-black uppercase tracking-widest text-xs shadow-xl hover:bg-[#0F2551] transition-all active:scale-95 border border-[#C9A84C]/30"
+                >
+                  <ExternalLink className="w-4 h-4" /> Send to TRADE
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
