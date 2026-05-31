@@ -1882,13 +1882,93 @@ export default function App() {
     const file = files[0];
     const isExcelOrCsv = file.name.endsWith('.xlsx') || file.name.endsWith('.csv');
     const isImage = file.type.startsWith('image/');
+    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
     if (isExcelOrCsv) {
       parseExcel(file);
+    } else if (isPDF) {
+      parsePDF(file);
     } else if (isImage) {
       analyzeImage(file);
     } else {
-      alert("Unsupported file format. Please upload Excel, CSV or Image.");
+      alert("Unsupported file format. Please upload Excel, CSV, PDF, PNG, or JPG.");
+    }
+  };
+
+  const parsePDF = async (file: File) => {
+    setIsProcessingAI(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+
+      const prompt = `
+        Analyze this supplier quote / quotation PDF document.
+        Separate the content into TWO categories:
+
+        1. PRODUCT ITEMS: Real products or services with quantities and prices.
+        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions.
+
+        Do NOT include the following as product items (put them in terms instead):
+        - Payment / Payment terms
+        - Lead time / Delivery time
+        - Validity / Offer validity
+        - Warranty / Guarantee
+        - Remarks / Notes / Comments
+        - Any row that has no quantity or no price and is clearly a condition or remark
+
+        Return ONLY valid JSON in this exact format:
+        {
+          "items": [
+            {
+              "originalName": "Item name",
+              "originalSpec": "Size/Spec/Description",
+              "quantity": 1,
+              "unit": "pc",
+              "targetUnitPrice": 0,
+              "targetTotal": 0
+            }
+          ],
+          "terms": "Payment: ... | Lead time: ... | Notes: ..."
+        }
+        If no terms found, set terms to "". If no items found, set items to [].
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: 'application/pdf', data: base64 } },
+            ],
+          },
+        ],
+        config: { responseMimeType: 'application/json' },
+      });
+
+      const parsed = JSON.parse(response.text || '{}');
+      const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const extractedTerms: string = parsed.terms || '';
+      if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+
+      const rows = extractedItems.map((it: any, idx: number) => ({
+        ...it,
+        id: `draft-pdf-${Date.now()}-${idx}`,
+        status: 'Need Review' as const,
+      }));
+
+      if (rows.length === 0) {
+        alert('AI could not extract items from this PDF. If it is a scanned/image PDF, try exporting as PNG or JPG and uploading the image instead.');
+        return;
+      }
+
+      await processWithAI(rows);
+    } catch (err) {
+      console.error('PDF Analysis Error:', err);
+      alert('PDF analysis failed. If this is a scanned PDF (image-based), please export the page as a PNG/JPG image and upload the image instead.');
+    } finally {
+      setIsProcessingAI(false);
     }
   };
 
@@ -3160,7 +3240,7 @@ export default function App() {
                     isDragging ? 'border-brand-gold bg-brand-gold/5 scale-[0.98]' : 'border-brand-beige hover:border-brand-gold/50 hover:bg-brand-beige/5'
                   }`}
                 >
-                  <input id="advanced-file-upload" type="file" className="hidden" accept=".xlsx,.csv,image/*" onChange={handleFileUpload} />
+                  <input id="advanced-file-upload" type="file" className="hidden" accept=".xlsx,.csv,.pdf,image/*" onChange={handleFileUpload} />
                   <div className="w-16 h-16 bg-brand-beige/20 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
                     {isProcessingAI ? (
                        <RefreshCw className="w-8 h-8 text-brand-gold animate-spin" />

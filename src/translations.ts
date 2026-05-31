@@ -517,7 +517,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'Drag and drop files here': '将文件拖拽至此处，或点击上传 / Drag and drop or click to upload',
     'Drop files to upload': '释放文件开始上传 / Drop files to upload',
     'Analyze Client List': '开始识别清单 / Analyze Client List',
-    'Supported formats': '支持 Excel, CSV, PNG, JPG / Supported: Excel, CSV, Image',
+    'Supported formats': '支持 Excel, CSV, PDF, PNG, JPG / Supported: Excel, CSV, PDF, Image',
     'Importing and Analyzing': '正在解析数据并进行 AI 识别... / Analyzing Client List...',
     'Vision Analysis': 'AI 视觉分析 / AI Vision Analysis',
     'Text Analysis': '文本分析 / Text Analysis',
