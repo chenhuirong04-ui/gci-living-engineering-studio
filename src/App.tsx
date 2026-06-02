@@ -1245,6 +1245,7 @@ export default function App() {
     setQuoteMode('package');
     setTradePhase('pricing');
     setProjectInfoSubmitted(true);
+    setAppMode('customer-quote'); // exit supplier-quote render trap so renderTradeQuoteReview() is reached
     setView('configurator');
   };
 
