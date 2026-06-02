@@ -270,6 +270,7 @@ export default function App() {
   const [supplierQuotes, setSupplierQuotes] = useState<SupplierQuote[]>([]);
   const [supplierQuotesLoading, setSupplierQuotesLoading] = useState(false);
   const [sqSaveStatus, setSqSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [savedSQId, setSavedSQId] = useState<string | null>(null); // id of the just-saved supplier quote
   const [sqSelectedFile, setSqSelectedFile] = useState<File | null>(null);   // track selected file for display
   const [sqParseStatus, setSqParseStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
   const [sqParseError, setSqParseError] = useState<string>('');
@@ -524,6 +525,7 @@ export default function App() {
     setPdfDownloaded(false);
     setCloudId(null);
     setSqSaveStatus('idle');
+    setSavedSQId(null);
     setSqSelectedFile(null);
     setSqParseStatus('idle');
     setSqParseError('');
@@ -1084,31 +1086,64 @@ export default function App() {
             </div>
           )}
 
-          {/* Save button */}
-          <div className="flex justify-end">
-            <button
-              onClick={async () => {
-                await handleSaveSupplierQuote();
-                // After save: go to History → Supplier Quotes tab
-                setTimeout(() => {
+          {/* Save / Post-save action buttons */}
+          {sqSaveStatus !== 'saved' ? (
+            /* Before save: show Save button */
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveSupplierQuote}
+                disabled={draftItems.length === 0 || sqSaveStatus === 'saving'}
+                className="px-12 py-5 rounded-[24px] font-black uppercase tracking-widest text-[13px] transition-all active:scale-95 flex items-center gap-3 shadow-xl disabled:opacity-40"
+                style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}
+              >
+                <Archive className="w-5 h-5" />
+                {sqSaveStatus === 'saving' ? 'Saving...' : 'Save Supplier Quote'}
+              </button>
+            </div>
+          ) : (
+            /* After save: show Convert + View Archive buttons */
+            <div className="space-y-3 animate-in fade-in duration-500">
+              {/* Success message */}
+              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-[16px]">
+                <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                <div>
+                  <p className="text-[13px] font-black text-green-800">Supplier Quote Saved</p>
+                  <p className="text-[11px] text-green-600">What would you like to do next?</p>
+                </div>
+              </div>
+
+              {/* PRIMARY: Convert to GCI Quote */}
+              <button
+                onClick={() => {
+                  if (!savedSQId) return;
+                  // Convert directly using the saved ID without going through History
+                  handleCreateGCIQuoteFromSupplier({ id: savedSQId, status: 'Active', currency: supplierMeta.currency || 'AED', total_cost: draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0), supplier_quote_no: '', supplier_name: supplierMeta.supplierName } as SupplierQuote);
+                }}
+                disabled={!savedSQId}
+                className="w-full py-5 rounded-[24px] font-black uppercase tracking-widest text-[14px] transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl"
+                style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}
+              >
+                <ExternalLink className="w-5 h-5" />
+                Convert to GCI Quote →
+              </button>
+
+              {/* SECONDARY: View in Archive */}
+              <button
+                onClick={() => {
                   setView('history');
                   setHistoryTab('supplier');
                   setDraftItems([]);
                   setTradeTerms('');
+                  setSqSaveStatus('idle');
+                  setSavedSQId(null);
                   setAppMode('landing');
-                }, 800);
-              }}
-              disabled={draftItems.length === 0 || sqSaveStatus === 'saving'}
-              className="px-12 py-5 rounded-[24px] font-black uppercase tracking-widest text-[13px] transition-all active:scale-95 flex items-center gap-3 shadow-xl disabled:opacity-40"
-              style={sqSaveStatus === 'saved'
-                ? { backgroundColor: '#10B981', color: 'white' }
-                : { backgroundColor: '#0C1B3A', color: '#C9A84C', borderColor: '#C9A84C30' }
-              }
-            >
-              <Archive className="w-5 h-5" />
-              {sqSaveStatus === 'saving' ? 'Saving...' : sqSaveStatus === 'saved' ? '✓ Saved!' : 'Save Supplier Quote'}
-            </button>
-          </div>
+                }}
+                className="w-full py-4 rounded-[24px] font-black uppercase tracking-widest text-[12px] transition-all border border-[#0C1B3A]/12 text-[#0C1B3A]/60 hover:border-[#0C1B3A]/30 hover:text-[#0C1B3A] flex items-center justify-center gap-2"
+              >
+                <History className="w-4 h-4" /> View in Supplier Quote Archive
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1147,6 +1182,7 @@ export default function App() {
       }));
       const id = await saveSupplierQuote(header, items);
       if (id) {
+        setSavedSQId(id);
         setSqSaveStatus('saved');
         // Refresh supplier quotes list if history is open
         if (view === 'history') {
@@ -1154,10 +1190,12 @@ export default function App() {
         }
       } else {
         setSqSaveStatus('error');
+        alert('❌ Save failed. Make sure supplier_quotes table exists in Supabase (run the SQL provided in setup).');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[Supplier Quote Save] Error:', e);
       setSqSaveStatus('error');
+      alert(`❌ Save failed: ${e?.message || 'Unknown error'}`);
     }
   };
 
