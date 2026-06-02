@@ -2364,7 +2364,7 @@ export default function App() {
     }
 
     if (isExcelOrCsv) {
-      if (appMode === 'supplier-quote') setSqSelectedFile(file);
+      // Excel/CSV: always auto-parse, never show Parse with AI button
       parseExcel(file);
     } else if (isPDF) {
       parsePDF(file);
@@ -2539,19 +2539,70 @@ Return ONLY valid JSON:
            mappings.item = headers.findIndex((h, idx) => idx !== mappings.no && keywords.item.some(k => h.includes(k)));
         }
 
-        setRawExcelData(jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex : 0));
-        setExcelMappings({
-          item: mappings.item !== -1 ? mappings.item : 0,
-          spec: mappings.spec !== -1 ? mappings.spec : 1,
-          qty: mappings.qty !== -1 ? mappings.qty : 2,
+        const autoMappings = {
+          item:  mappings.item  !== -1 ? mappings.item  : 0,
+          spec:  mappings.spec  !== -1 ? mappings.spec  : 1,
+          qty:   mappings.qty   !== -1 ? mappings.qty   : 2,
           price: mappings.price !== -1 ? mappings.price : 4,
-          total: mappings.total !== -1 ? mappings.total : 5
-        });
-        setShowMapping(true);
+          total: mappings.total !== -1 ? mappings.total : 5,
+        };
+
+        if (appMode === 'supplier-quote') {
+          // ── Supplier Quote mode: auto-process without mapping dialog ──────
+          // No Gemini involved. Parse immediately and show items.
+          const dataRows = jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1);
+          const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
+          const rows: any[] = [];
+          dataRows.forEach((row: any, idx: number) => {
+            const name = String(row[autoMappings.item] || '').trim();
+            const nameLower = name.toLowerCase();
+            if (!name || name === '0') return;
+            const isHeader = nameLower.includes('item') || nameLower.includes('品名');
+            const isSerial = /^\d+$/.test(name) || ['no','no.','s.no','序号','编号','sn'].includes(nameLower) || (name.length < 2 && /^\d$/.test(name));
+            if (isHeader || isSerial) return;
+            const isTerm = TERM_KEYWORDS.some(k => nameLower.includes(k));
+            if (isTerm) {
+              const termVal = String(row[autoMappings.spec] || row[autoMappings.price] || '').trim();
+              setTradeTerms(prev => prev ? `${prev}\n${name}${termVal ? ': ' + termVal : ''}` : `${name}${termVal ? ': ' + termVal : ''}`);
+              return;
+            }
+            const unitPrice = parseFloat(String(row[autoMappings.price] || '0').replace(/[^0-9.-]/g, '')) || 0;
+            const qty = parseFloat(String(row[autoMappings.qty] || '1').replace(/[^0-9.-]/g, '')) || 1;
+            rows.push({
+              id: `sq-xl-${Date.now()}-${idx}`,
+              originalName: name,
+              originalSpec: String(row[autoMappings.spec] || '').trim(),
+              quantity: qty,
+              unit: 'pc',
+              targetUnitPrice: unitPrice,
+              targetTotal: unitPrice * qty,
+              status: 'Confirmed' as const,
+              suggestedCategory: FurnitureCategory.OTHER,
+              confidence: 1,
+            });
+          });
+          if (rows.length === 0) {
+            const msg = 'No items found in Excel. Check that item names and prices are in the correct columns.';
+            setSqParseError(msg);
+            setSqParseStatus('error');
+            alert(`❌ ${msg}`);
+          } else {
+            setDraftItems(rows);
+            setSqParseStatus('done');
+          }
+        } else {
+          // ── Normal mode: show column mapping dialog ───────────────────────
+          setRawExcelData(jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex : 0));
+          setExcelMappings(autoMappings);
+          setShowMapping(true);
+        }
 
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
         console.error('Error parsing Excel:', err);
-        alert(t('Failed to parse Excel file') + ': ' + (err instanceof Error ? err.message : 'Unknown error'));
+        setSqParseError(errMsg);
+        setSqParseStatus('error');
+        alert(`❌ Excel parse failed: ${errMsg}`);
       } finally {
         setIsProcessingAI(false);
       }
