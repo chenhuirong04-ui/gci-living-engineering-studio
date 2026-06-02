@@ -60,6 +60,19 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 /** Single Gemini model used for ALL AI analysis (text / image / PDF / classification). */
 const GEMINI_MODEL = "gemini-3-flash-preview";
+
+/** Wrap any promise with a timeout. Rejects with readable message on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Request'): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(
+        `${label} timed out after ${ms / 1000}s. ` +
+        `If you are in China, Google AI services may be blocked — try a VPN, or add items manually.`
+      )), ms)
+    ),
+  ]);
+}
 import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
@@ -257,6 +270,12 @@ export default function App() {
   const [supplierQuotes, setSupplierQuotes] = useState<SupplierQuote[]>([]);
   const [supplierQuotesLoading, setSupplierQuotesLoading] = useState(false);
   const [sqSaveStatus, setSqSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [sqSelectedFile, setSqSelectedFile] = useState<File | null>(null);   // track selected file for display
+  const [sqParseStatus, setSqParseStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
+  const [sqParseError, setSqParseError] = useState<string>('');
+  // Navigation source — tracks where user came from when entering Pricing Review
+  const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | null>(null);
+  const [sqSourceId, setSqSourceId] = useState<string | null>(null); // supplier quote id for back nav
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -505,6 +524,11 @@ export default function App() {
     setPdfDownloaded(false);
     setCloudId(null);
     setSqSaveStatus('idle');
+    setSqSelectedFile(null);
+    setSqParseStatus('idle');
+    setSqParseError('');
+    setQuoteSource(null);
+    setSqSourceId(null);
     setCloudSaveStatus('idle');
     setAppMode('landing');
     setPackageItems([]);
@@ -876,38 +900,107 @@ export default function App() {
               <label className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 flex items-center gap-2">
                 <Upload className="w-3.5 h-3.5" /> Upload file
               </label>
+              {/* Drop zone */}
               <div
                 onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={e => { e.preventDefault(); setIsDragging(false); handleFileUpload({ target: { files: e.dataTransfer.files } } as any); }}
-                onClick={() => document.getElementById('sq-file-upload')?.click()}
-                className={`h-44 rounded-[20px] border-4 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all ${isDragging ? 'border-[#C9A84C] bg-[#C9A84C]/5' : 'border-[#0C1B3A]/10 hover:border-[#C9A84C]/40'}`}
+                onClick={() => !isProcessingAI && document.getElementById('sq-file-upload')?.click()}
+                style={{ cursor: isProcessingAI ? 'not-allowed' : 'pointer' }}
+                className={`h-40 rounded-[20px] border-4 border-dashed flex flex-col items-center justify-center transition-all select-none
+                  ${sqSelectedFile ? 'border-[#C9A84C] bg-[#C9A84C]/5' : isDragging ? 'border-[#C9A84C] bg-[#C9A84C]/5' : 'border-[#0C1B3A]/10 hover:border-[#C9A84C]/40'}`}
               >
-                <input id="sq-file-upload" type="file" className="hidden" accept=".xlsx,.csv,.pdf,image/*" onChange={handleFileUpload} />
-                {isProcessingAI
-                  ? <RefreshCw className="w-8 h-8 text-[#C9A84C] animate-spin" />
-                  : <Upload className="w-8 h-8 text-[#0C1B3A]/20" />
-                }
-                <p className="text-[12px] font-bold text-[#0C1B3A]/40 mt-3">Drag & drop or click</p>
-                <p className="text-[11px] text-[#0C1B3A]/25 mt-1">Excel, CSV, PDF, PNG, JPG</p>
+                <input
+                  id="sq-file-upload"
+                  type="file"
+                  style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+                  accept=".xlsx,.csv,.pdf,image/*"
+                  onChange={handleFileUpload}
+                />
+                {sqSelectedFile ? (
+                  <>
+                    <CheckCircle2 className="w-8 h-8 text-[#C9A84C]" />
+                    <p className="text-[13px] font-black text-[#0C1B3A] mt-2 px-4 text-center truncate max-w-full">{sqSelectedFile.name}</p>
+                    <p className="text-[11px] text-[#0C1B3A]/40 mt-1">{(sqSelectedFile.size / 1024).toFixed(1)} KB · Click to replace</p>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-8 h-8 text-[#0C1B3A]/20" />
+                    <p className="text-[12px] font-bold text-[#0C1B3A]/40 mt-3">Drag & drop or click to select</p>
+                    <p className="text-[11px] text-[#0C1B3A]/25 mt-1">Excel, CSV, PDF, PNG, JPG</p>
+                  </>
+                )}
               </div>
+
+              {/* Parse error display */}
+              {sqParseStatus === 'error' && sqParseError && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-[16px]">
+                  <p className="text-[11px] font-black text-red-600 uppercase tracking-widest mb-1">❌ Parse Failed</p>
+                  <p className="text-[12px] text-red-700">{sqParseError}</p>
+                  <p className="text-[11px] text-red-500 mt-2">
+                    In China: Google AI may be blocked. Try VPN, or use text paste, or add items manually below.
+                  </p>
+                </div>
+              )}
+
+              {/* Parse with AI button (explicit, not auto-triggered) */}
+              {sqSelectedFile && (
+                <button
+                  onClick={() => {
+                    if (!sqSelectedFile || isProcessingAI) return;
+                    setSqParseStatus('parsing');
+                    setSqParseError('');
+                    const isPDF = sqSelectedFile.type === 'application/pdf' || sqSelectedFile.name.toLowerCase().endsWith('.pdf');
+                    const isImage = sqSelectedFile.type.startsWith('image/');
+                    if (isPDF) parsePDF(sqSelectedFile);
+                    else if (isImage) analyzeImage(sqSelectedFile);
+                    else parseExcel(sqSelectedFile);
+                  }}
+                  disabled={isProcessingAI}
+                  className="w-full py-3.5 rounded-[16px] text-[13px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
+                  style={isProcessingAI
+                    ? { backgroundColor: '#0C1B3A20', color: '#0C1B3A40', cursor: 'not-allowed' }
+                    : { backgroundColor: '#0C1B3A', color: '#C9A84C' }
+                  }
+                >
+                  {isProcessingAI
+                    ? <><RefreshCw className="w-4 h-4 animate-spin" /> Parsing… (up to 25s)</>
+                    : <><Cpu className="w-4 h-4" /> Parse with AI</>
+                  }
+                </button>
+              )}
             </div>
           </div>
-          {/* Analyze button */}
+
+          {/* Text analyze button */}
+          {importText.trim() && (
           <button
-            onClick={importText.trim() ? handleAnalyze : undefined}
-            disabled={!importText.trim() || isProcessingAI}
+            onClick={handleAnalyze}
+            disabled={isProcessingAI}
             className="w-full py-4 rounded-[20px] text-[13px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all"
-            style={importText.trim() && !isProcessingAI
+            style={!isProcessingAI
               ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
               : { backgroundColor: '#0C1B3A10', color: '#0C1B3A30', cursor: 'not-allowed' }
             }
           >
             <Cpu className="w-4 h-4" />
-            {isProcessingAI ? 'Analyzing Supplier Quote...' : 'Analyze Supplier Quote'}
+            {isProcessingAI ? 'Analyzing… (up to 25s, may be slow in China)' : 'Analyze Text with AI'}
           </button>
+          )}
         </div>
       </div>
+
+      {/* Manual fallback: add items without AI */}
+      {draftItems.length === 0 && (sqParseStatus === 'error' || sqParseStatus === 'idle') && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => setDraftItems([{ id: `sq-manual-${Date.now()}`, originalName: 'Item 1', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER }])}
+            className="flex items-center gap-2 px-6 py-3 rounded-[16px] border-2 border-dashed border-[#0C1B3A]/15 text-[#0C1B3A]/50 text-[12px] font-black uppercase tracking-widest hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all"
+          >
+            <Plus className="w-4 h-4" /> Add Items Manually (no AI needed)
+          </button>
+        </div>
+      )}
 
       {/* Supplier Cost Items (parsed result) */}
       {draftItems.length > 0 && (
@@ -1104,6 +1197,10 @@ export default function App() {
     setMarkupPercents({});
     setQuoteGenerated(false);
     setSentToTrade(false);
+
+    // Track navigation source for breadcrumb/back nav
+    setQuoteSource('supplier-archive');
+    setSqSourceId(sq.id || null);
 
     // Navigate to pricing flow
     setQuoteType('trade');
@@ -2257,7 +2354,17 @@ export default function App() {
     const isImage = file.type.startsWith('image/');
     const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
+    // In Supplier Quote mode: store file first, let user click "Parse" explicitly.
+    // Excel/CSV never needs AI so auto-parse those regardless.
+    if (appMode === 'supplier-quote' && !isExcelOrCsv) {
+      setSqSelectedFile(file);
+      setSqParseStatus('idle');
+      setSqParseError('');
+      return; // user must click Parse button explicitly
+    }
+
     if (isExcelOrCsv) {
+      if (appMode === 'supplier-quote') setSqSelectedFile(file);
       parseExcel(file);
     } else if (isPDF) {
       parsePDF(file);
@@ -2270,6 +2377,8 @@ export default function App() {
 
   const parsePDF = async (file: File) => {
     setIsProcessingAI(true);
+    setSqParseStatus('parsing');
+    setSqParseError('');
     try {
       // ── Step 1: file type ──────────────────────────────────────────────
       console.log('[PDF] Step 1 file.type:', file.type, '| file.name:', file.name, '| size:', file.size);
@@ -2291,25 +2400,23 @@ export default function App() {
 Return ONLY valid JSON:
 {"items":[{"originalName":"name","originalSpec":"spec","quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0}],"terms":"..."}`;
 
-      // ── Step 4: Gemini call ───────────────────────────────────────────
+      // ── Step 4: Gemini call (25s timeout for China network) ──────────
       console.log('[PDF] Step 4 calling Gemini...');
       let response: any;
       try {
-        response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: 'application/pdf', data: base64 } },
-            ],
-          }],
-        });
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType: 'application/pdf', data: base64 } }] }],
+          }),
+          25000, 'PDF AI Analysis'
+        );
         console.log('[PDF] Step 4 Gemini responded OK');
       } catch (geminiErr: any) {
-        const msg = geminiErr?.message || geminiErr?.toString() || 'unknown Gemini error';
+        const msg = geminiErr?.message || geminiErr?.toString() || 'Unknown Gemini error';
         console.error('[PDF] Step 4 Gemini FAILED:', msg, geminiErr);
-        alert(`PDF → Gemini call failed:\n${msg}\n\nCheck browser console for details.`);
+        setSqParseError(msg); setSqParseStatus('error');
+        alert(`❌ PDF AI failed:\n${msg}`);
         return;
       }
 
@@ -2353,10 +2460,13 @@ Return ONLY valid JSON:
       }
 
       await processWithAI(rows);
+      setSqParseStatus('done');
     } catch (err: any) {
       const msg = err?.message || err?.toString() || 'unknown error';
       console.error('[PDF] Unexpected error:', err);
-      alert(`PDF analysis error:\n${msg}`);
+      setSqParseError(msg);
+      setSqParseStatus('error');
+      alert(`❌ PDF analysis error:\n${msg}`);
     } finally {
       setIsProcessingAI(false);
     }
@@ -2624,11 +2734,10 @@ Return ONLY valid JSON:
         If no terms found, set terms to "". If no items found, set items to [].
       `;
 
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({ model: GEMINI_MODEL, contents: prompt, config: { responseMimeType: "application/json" } }),
+        25000, 'AI Text Analysis'
+      );
 
       const parsed = JSON.parse(response.text || '{}');
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
@@ -2642,9 +2751,12 @@ Return ONLY valid JSON:
 
       await processWithAI(rows);
       setImportText('');
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err?.message || 'AI Text Analysis failed.';
       console.error('Text Analysis Error:', err);
-      alert('AI Text Analysis failed.');
+      setSqParseError(msg);
+      setSqParseStatus('error');
+      alert(`❌ ${msg}`);
     } finally {
       setIsProcessingAI(false);
     }
@@ -2815,6 +2927,10 @@ Return ONLY valid JSON:
 
   const renderProjectInfo = () => (
     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
+      {/* Back to Workflow Home */}
+      <button onClick={() => setAppMode('landing')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+        <ChevronLeft className="w-4 h-4" /> Workflow Home
+      </button>
       <StepIndicator current={1} />
       <div className="text-center space-y-6">
         <div className="inline-block px-4 py-1.5 bg-brand-gold/10 rounded-full mb-2">
@@ -2952,22 +3068,64 @@ Return ONLY valid JSON:
       setSentToTrade(true);
     };
 
+    // Determine back destination based on navigation source
+    const handleBackFromPricing = () => {
+      if (quoteSource === 'supplier-archive') {
+        // Back to History > Supplier Quotes
+        setView('history');
+        setHistoryTab('supplier');
+        setQuoteSource(null);
+        setSqSourceId(null);
+        setTradePhase(null);
+        setQuoteType(null);
+        setQuoteMode(null);
+        setAppMode('landing');
+      } else {
+        setTradePhase('upload');
+      }
+    };
+
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
-        {/* Breadcrumb */}
+        {/* Breadcrumb — source-aware */}
         <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest flex-wrap">
-          <button onClick={() => setProjectInfoSubmitted(false)} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Project Info</button>
-          <span className="text-[#0C1B3A]/15">›</span>
-          <button
-            onClick={() => { setQuoteMode(null); setSelectedScenario(null); setQuoteType(null); setTradePhase(null); setActiveTab('items'); }}
-            className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors"
-          >Quote Type</button>
-          <span className="text-[#0C1B3A]/15">›</span>
-          <button onClick={() => setTradePhase('upload')} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
-            {quoteType === 'boq' ? 'BOQ & AI Analysis' : 'Trade & Sourcing'}
-          </button>
-          <span className="text-[#0C1B3A]/15">›</span>
-          <span className="text-[#C9A84C]">Pricing Review</span>
+          {quoteSource === 'supplier-archive' ? (
+            <>
+              <button onClick={() => { setAppMode('landing'); setView('configurator'); setQuoteSource(null); setQuoteType(null); setQuoteMode(null); setTradePhase(null); }} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Workflow Home</button>
+              <span className="text-[#0C1B3A]/15">›</span>
+              <button onClick={() => { setView('history'); setHistoryTab('supplier'); setQuoteSource(null); setQuoteType(null); setQuoteMode(null); setTradePhase(null); setAppMode('landing'); }} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Supplier Quote Archive</button>
+              <span className="text-[#0C1B3A]/15">›</span>
+              <span className="text-[#C9A84C]">GCI Quote Pricing Review</span>
+            </>
+          ) : (
+            <>
+              <button onClick={() => { setAppMode('landing'); setView('configurator'); setProjectInfoSubmitted(false); setQuoteType(null); }} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Workflow Home</button>
+              <span className="text-[#0C1B3A]/15">›</span>
+              <button onClick={() => { setQuoteMode(null); setSelectedScenario(null); setQuoteType(null); setTradePhase(null); setActiveTab('items'); }} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Quote Type</button>
+              <span className="text-[#0C1B3A]/15">›</span>
+              <button onClick={handleBackFromPricing} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+                {quoteType === 'boq' ? 'BOQ & AI Analysis' : 'Trade & Sourcing'}
+              </button>
+              <span className="text-[#0C1B3A]/15">›</span>
+              <span className="text-[#C9A84C]">Pricing Review</span>
+            </>
+          )}
+        </div>
+
+        {/* Back button — always visible */}
+        <button
+          onClick={handleBackFromPricing}
+          className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          {quoteSource === 'supplier-archive' ? 'Back to Supplier Quote Archive' : 'Back to Cost Items'}
+        </button>
+
+        {/* Page title — source-aware */}
+        <div className="flex items-center gap-3">
+          <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">
+            {quoteSource === 'supplier-archive' ? 'Supplier Quote → GCI Quote' : 'Trade & Sourcing'}
+          </span>
         </div>
 
         <StepIndicator current={4} />
@@ -5977,7 +6135,7 @@ Return ONLY valid JSON:
                       <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">创建客户报价</p>
                     </div>
                     <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
-                      Generate GCI quotation for a client. Choose Custom Item, Trade & Sourcing, or BOQ path. Send to TRADE when done.
+                      Generate GCI quotation for a client. Best for: Custom furniture items (BOM), Engineering BOQ, or Trade & Sourcing with supplier cost markup. Ends with Send to TRADE.
                     </p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Start →</p>
                   </button>
