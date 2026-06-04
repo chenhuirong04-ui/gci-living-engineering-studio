@@ -2581,7 +2581,8 @@ Return ONLY valid JSON:
         // AED-priority price column selection: prefer AED column, reject RMB/CNY/SAR columns
         const IGNORED_CURRENCIES = ['rmb', 'cny', 'sar', 'saudi riyal'];
         const aedPriceIdx = headers.findIndex((h: string) =>
-          h.includes('aed') && keywords.price.some((k: string) => h.includes(k))
+          h === 'aed' ||
+          (h.includes('aed') && keywords.price.some((k: string) => h.includes(k)))
         );
         if (aedPriceIdx !== -1) {
           mappings.price = aedPriceIdx;
