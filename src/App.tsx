@@ -2578,6 +2578,21 @@ Return ONLY valid JSON:
            mappings.item = headers.findIndex((h, idx) => idx !== mappings.no && keywords.item.some(k => h.includes(k)));
         }
 
+        // AED-priority price column selection: prefer AED column, reject RMB/CNY/SAR columns
+        const IGNORED_CURRENCIES = ['rmb', 'cny', 'sar', 'saudi riyal'];
+        const aedPriceIdx = headers.findIndex((h: string) =>
+          h.includes('aed') && keywords.price.some((k: string) => h.includes(k))
+        );
+        if (aedPriceIdx !== -1) {
+          mappings.price = aedPriceIdx;
+        } else if (mappings.price !== -1 && IGNORED_CURRENCIES.some(c => headers[mappings.price].includes(c))) {
+          // Current best match is an ignored currency — look for a clean price column
+          mappings.price = headers.findIndex((h: string) =>
+            keywords.price.some((k: string) => h === k || (h.length > 1 && h.includes(k))) &&
+            !IGNORED_CURRENCIES.some(c => h.includes(c))
+          );
+        }
+
         const autoMappings = {
           item:  mappings.item  !== -1 ? mappings.item  : 0,
           spec:  mappings.spec  !== -1 ? mappings.spec  : 1,
@@ -2589,6 +2604,13 @@ Return ONLY valid JSON:
         if (appMode === 'supplier-quote') {
           // ── Supplier Quote mode: auto-process without mapping dialog ──────
           // No Gemini involved. Parse immediately and show items.
+          if (mappings.price === -1) {
+            const msg = 'AED price not found. Please ensure the Excel file contains a price column in AED.';
+            setSqParseError(msg);
+            setSqParseStatus('error');
+            alert(`❌ ${msg}`);
+            return;
+          }
           const dataRows = jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1);
           const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
           const rows: any[] = [];
