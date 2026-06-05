@@ -1050,7 +1050,7 @@ export default function App() {
                       className="w-full text-[13px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1" />
                   </div>
                   <div className="col-span-2 text-right">
-                    <input type="number" min="0" step="0.01" value={item.targetUnitPrice || ''} placeholder="0.00"
+                    <input type="number" min="0" step="0.01" value={item.targetUnitPrice ? Number(item.targetUnitPrice.toFixed(2)) : ''} placeholder="0.00"
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value)||0, targetTotal: (Number(e.target.value)||0) * it.quantity } : it))}
                       className="w-full text-right text-[14px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
                   </div>
