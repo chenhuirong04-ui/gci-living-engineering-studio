@@ -7124,7 +7124,7 @@ Return ONLY valid JSON:
                   </button>
                   <button
                     onClick={handleConfirmRate}
-                    className="flex-2 px-8 py-3.5 rounded-[16px] bg-[#C9A84C] text-[#0C1B3A] text-[12px] font-black uppercase tracking-widest shadow-lg hover:bg-[#E8C96A] transition-all active:scale-95"
+                    className="flex-1 px-8 py-3.5 rounded-[16px] bg-[#C9A84C] text-[#0C1B3A] text-[12px] font-black uppercase tracking-widest shadow-lg hover:bg-[#E8C96A] transition-all active:scale-95"
                   >
                     Confirm & Enter Pricing →
                   </button>
