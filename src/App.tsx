@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -225,7 +226,8 @@ interface PkgQuoteItem {
   unitCost: number;
   subtotal: number;
   currency: string;
-  imageFormula?: string; // DISPIMG ID — POC only, not displayed
+  imageFormula?: string; // DISPIMG ID
+  imageDataUrl?: string; // base64 data URL extracted from xlsx zip
 }
 interface PkgQuoteGroup {
   id: string;
@@ -856,143 +858,189 @@ export default function App() {
   };
 
   // ── Package Quote: parse multi-sheet Excel ──────────────────────────────
-  const parsePackageExcel = (file: File) => {
+  const parsePackageExcel = async (file: File) => {
     setPqParseStatus('parsing');
     setPqParseError('');
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        console.log('[parsePackageExcel] SheetNames:', workbook.SheetNames);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const workbook = XLSX.read(data, { type: 'array' });
+      console.log('[parsePackageExcel] SheetNames:', workbook.SheetNames);
 
-        const SKIP_WORDS = ['summary','total','totals','总表','汇总','合计','总计','overview','汇总表'];
-        const productSheets = workbook.SheetNames.filter(n =>
-          !SKIP_WORDS.some(k => n.toLowerCase().trim().includes(k))
+      // ── Step 1: extract DISPIMG ID → image dataUrl via JSZip ─────────────
+      // Map: dispimgId → base64 data URL
+      const imgDataUrls: Record<string, string> = {};
+      try {
+        const zip = await JSZip.loadAsync(arrayBuffer);
+
+        // Parse cellimages.xml.rels → rId → media filename
+        const relsFile = zip.files['xl/_rels/cellimages.xml.rels'];
+        const cellImgFile = zip.files['xl/cellimages.xml'];
+
+        if (relsFile && cellImgFile) {
+          const relsText = await relsFile.async('text');
+          const cellText = await cellImgFile.async('text');
+
+          // rId → media path
+          const ridToMedia: Record<string, string> = {};
+          const relMatches = relsText.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g);
+          for (const m of relMatches) {
+            if (!m[2].toLowerCase().includes('null')) {
+              ridToMedia[m[1]] = m[2]; // e.g. rId26 → media/image29.png
+            }
+          }
+
+          // name (DISPIMG ID) → rId (from r:embed)
+          const idToRid: Record<string, string> = {};
+          const cellMatches = cellText.matchAll(/name="(ID_[A-F0-9]+)"[\s\S]*?r:embed="([^"]+)"/gi);
+          for (const m of cellMatches) {
+            idToRid[m[1]] = m[2]; // e.g. ID_xxx → rId26
+          }
+
+          // Build final: DISPIMG ID → base64 data URL
+          for (const [dispId, rid] of Object.entries(idToRid)) {
+            const mediaPath = ridToMedia[rid];
+            if (!mediaPath) continue;
+            const fullPath = `xl/${mediaPath}`; // xl/media/image29.png
+            const mediaFile = zip.files[fullPath];
+            if (!mediaFile) continue;
+            const b64 = await mediaFile.async('base64');
+            const ext = fullPath.split('.').pop()?.toLowerCase() || 'png';
+            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+            imgDataUrls[dispId] = `data:${mime};base64,${b64}`;
+          }
+          console.log(`[parsePackageExcel] Extracted ${Object.keys(imgDataUrls).length} images`);
+        } else {
+          console.log('[parsePackageExcel] No cellimages.xml found — skipping image extraction');
+        }
+      } catch (imgErr) {
+        // Image extraction failure must never break item parsing
+        console.warn('[parsePackageExcel] Image extraction failed (non-fatal):', imgErr);
+      }
+
+      // ── Step 2: parse sheets → packages ─────────────────────────────────
+      const SKIP_WORDS = ['summary','total','totals','总表','汇总','合计','总计','overview','汇总表'];
+      const productSheets = workbook.SheetNames.filter(n =>
+        !SKIP_WORDS.some(k => n.toLowerCase().trim().includes(k))
+      );
+      if (productSheets.length === 0) {
+        throw new Error('No product sheets found. All sheets appear to be summary sheets.');
+      }
+
+      const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','grand'];
+      const NOTE_PREFIXES = ['注：','注:','备注','note:','*','（注','(注'];
+      const packages: PkgQuoteGroup[] = [];
+
+      productSheets.forEach((sheetName, si) => {
+        const ws = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
+        const rows = jsonData.filter((r: any[]) =>
+          Array.isArray(r) && r.some(c => c !== null && c !== undefined && String(c).trim() !== '')
         );
-        if (productSheets.length === 0) {
-          throw new Error('No product sheets found. All sheets appear to be summary sheets.');
+
+        const HDR_ITEM = ['名称','name'];
+        const HDR_PRICE = ['单价','price','单价 '];
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 8); i++) {
+          const row = rows[i].map((c: any) => String(c || '').toLowerCase().trim());
+          const hasItem = row.some((c: string) => HDR_ITEM.some(k => c.includes(k)));
+          const hasPrice = row.some((c: string) => HDR_PRICE.some(k => c.includes(k)));
+          if (hasItem && hasPrice) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) {
+          console.warn(`[parsePackageExcel] No header in sheet "${sheetName}", skipping`);
+          return;
         }
 
-        const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','grand'];
-        const NOTE_PREFIXES = ['注：','注:','备注','note:','*','（注','(注'];
-        const packages: PkgQuoteGroup[] = [];
+        const headers = rows[headerIdx].map((h: any) => String(h || '').toLowerCase().replace(/\s+/g, ' ').trim());
+        const findCol = (keys: string[]) => headers.findIndex((h: string) => keys.some(k => h.includes(k)));
+        const colSeq   = findCol(['序号','no.','no ']);
+        const colArea  = findCol(['区域','area']);
+        const colName  = findCol(['名称','name']);
+        const colImg   = findCol(['图片','description','图']);
+        const colMat   = findCol(['材质','material']);
+        const colSpec  = findCol(['规格','size','spec']);
+        const colQty   = findCol(['数量','quantity','qty']);
+        const colUnit  = findCol(['单位','unit']);
+        const colPrice = findCol(['单价','price']);
+        const colSub   = findCol(['小计','sub total','subtotal','合计']);
 
-        productSheets.forEach((sheetName, si) => {
-          const ws = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
-          const rows = jsonData.filter((r: any[]) =>
-            Array.isArray(r) && r.some(c => c !== null && c !== undefined && String(c).trim() !== '')
-          );
+        let packageTotal = 0;
+        const dataRows = rows.slice(headerIdx + 1);
+        const totalRow = dataRows.find((r: any[]) => {
+          const vals = r.map((c: any) => String(c || '').trim());
+          return vals.some(v => v === '总计' || v === '合计' || v === 'Grand Total');
+        });
+        if (totalRow && colSub !== -1) {
+          packageTotal = parseFloat(String(totalRow[colSub] || '0').replace(/[^0-9.-]/g, '')) || 0;
+        }
 
-          // Find header row (must contain 名称/name AND 单价/price keywords)
-          const HDR_ITEM = ['名称','name'];
-          const HDR_PRICE = ['单价','price','单价 '];
-          let headerIdx = -1;
-          for (let i = 0; i < Math.min(rows.length, 8); i++) {
-            const row = rows[i].map((c: any) => String(c || '').toLowerCase().trim());
-            const hasItem = row.some((c: string) => HDR_ITEM.some(k => c.includes(k)));
-            const hasPrice = row.some((c: string) => HDR_PRICE.some(k => c.includes(k)));
-            if (hasItem && hasPrice) { headerIdx = i; break; }
-          }
-          if (headerIdx === -1) {
-            console.warn(`[parsePackageExcel] No header found in sheet "${sheetName}", skipping`);
-            return;
-          }
+        const items: PkgQuoteItem[] = [];
+        dataRows.forEach((row: any[], idx: number) => {
+          const rawName = colName !== -1 ? String(row[colName] || '').trim() : '';
+          if (!rawName) return;
+          const nameLower = rawName.toLowerCase();
+          if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
+          if (NOTE_PREFIXES.some(p => rawName.startsWith(p))) return;
+          if (/^[1-9一二三四五六七八九][、。．,.]/.test(rawName)) return;
+          if (HDR_ITEM.some(k => nameLower.includes(k)) && HDR_PRICE.some(k => nameLower.includes(k))) return;
+          if (rawName.length > 0 && colArea !== -1 && !row[colArea] && colQty !== -1 && !row[colQty]) return;
 
-          const headers = rows[headerIdx].map((h: any) => String(h || '').toLowerCase().replace(/\s+/g, ' ').trim());
-          const findCol = (keys: string[]) => headers.findIndex((h: string) => keys.some(k => h.includes(k)));
-          const colSeq    = findCol(['序号','no.','no ']);
-          const colArea   = findCol(['区域','area']);
-          const colName   = findCol(['名称','name']);
-          const colImg    = findCol(['图片','description','图']);
-          const colMat    = findCol(['材质','material']);
-          const colSpec   = findCol(['规格','size','spec']);
-          const colQty    = findCol(['数量','quantity','qty']);
-          const colUnit   = findCol(['单位','unit']);
-          const colPrice  = findCol(['单价','price']);
-          const colSub    = findCol(['小计','sub total','subtotal','合计']);
+          const rawImg = colImg !== -1 ? String(row[colImg] || '') : '';
+          const imgIdMatch = rawImg.match(/ID_([A-F0-9]+)/i);
+          const dispimgId = imgIdMatch ? `ID_${imgIdMatch[1].toUpperCase()}` : undefined;
+          const imageFormula = rawImg.includes('DISPIMG') ? rawImg : undefined;
+          const imageDataUrl = dispimgId ? imgDataUrls[dispimgId] : undefined;
 
-          // Detect package total from 总计 row
-          let packageTotal = 0;
-          const dataRows = rows.slice(headerIdx + 1);
-          const totalRow = dataRows.find((r: any[]) => {
-            const vals = r.map((c: any) => String(c || '').trim());
-            return vals.some(v => v === '总计' || v === '合计' || v === 'Grand Total');
+          const qty = parseFloat(String(row[colQty] ?? '1').replace(/[^0-9.-]/g, '')) || 1;
+          const unitCost = parseFloat(String(row[colPrice] ?? '0').replace(/[^0-9.-]/g, '')) || 0;
+          const sub = parseFloat(String(row[colSub] ?? '0').replace(/[^0-9.-]/g, '')) || unitCost * qty;
+
+          items.push({
+            id: `pq-${si}-${idx}`,
+            seq:      colSeq  !== -1 ? String(row[colSeq] || '').trim()  : String(idx + 1),
+            area:     colArea !== -1 ? String(row[colArea] || '').trim() : '',
+            name:     rawName,
+            material: colMat  !== -1 ? String(row[colMat] || '').trim()  : '',
+            spec:     colSpec !== -1 ? String(row[colSpec] || '').trim()  : '',
+            qty,
+            unit:     colUnit !== -1 ? String(row[colUnit] || '').trim()  : '件',
+            unitCost,
+            subtotal: sub,
+            currency: pqMeta.currency || 'CNY',
+            imageFormula,
+            imageDataUrl,
           });
-          if (totalRow && colSub !== -1) {
-            packageTotal = parseFloat(String(totalRow[colSub] || '0').replace(/[^0-9.-]/g, '')) || 0;
-          }
-
-          const items: PkgQuoteItem[] = [];
-          dataRows.forEach((row: any[], idx: number) => {
-            const rawName = colName !== -1 ? String(row[colName] || '').trim() : '';
-            if (!rawName) return;
-            const nameLower = rawName.toLowerCase();
-            // Skip total/summary rows
-            if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
-            // Skip note rows
-            if (NOTE_PREFIXES.some(p => rawName.startsWith(p))) return;
-            // Skip numbered note continuations
-            if (/^[1-9一二三四五六七八九][、。．,.]/.test(rawName)) return;
-            // Skip header-like rows
-            if (HDR_ITEM.some(k => nameLower.includes(k)) && HDR_PRICE.some(k => nameLower.includes(k))) return;
-            // Skip brand/company rows
-            if (rawName.length > 0 && colArea !== -1 && !row[colArea] && colQty !== -1 && !row[colQty]) return;
-
-            const rawImg = colImg !== -1 ? String(row[colImg] || '') : '';
-            const imageFormula = rawImg.includes('DISPIMG') ? rawImg : undefined;
-            const qty = parseFloat(String(row[colQty] ?? '1').replace(/[^0-9.-]/g, '')) || 1;
-            const unitCost = parseFloat(String(row[colPrice] ?? '0').replace(/[^0-9.-]/g, '')) || 0;
-            const sub = parseFloat(String(row[colSub] ?? '0').replace(/[^0-9.-]/g, '')) || unitCost * qty;
-
-            items.push({
-              id: `pq-${si}-${idx}`,
-              seq:      colSeq  !== -1 ? String(row[colSeq] || '').trim()  : String(idx + 1),
-              area:     colArea !== -1 ? String(row[colArea] || '').trim() : '',
-              name:     rawName,
-              material: colMat  !== -1 ? String(row[colMat] || '').trim()  : '',
-              spec:     colSpec !== -1 ? String(row[colSpec] || '').trim()  : '',
-              qty,
-              unit:     colUnit !== -1 ? String(row[colUnit] || '').trim()  : '件',
-              unitCost,
-              subtotal: sub,
-              currency: pqMeta.currency || 'CNY',
-              imageFormula,
-            });
-          });
-
-          if (items.length > 0 || packageTotal > 0) {
-            packages.push({
-              id: `pkg-${si}`,
-              packageName: sheetName,
-              items,
-              totalCost: packageTotal || items.reduce((s, it) => s + it.subtotal, 0),
-              currency: pqMeta.currency || 'CNY',
-            });
-          }
         });
 
-        if (packages.length === 0) throw new Error('No packages could be parsed from this Excel file.');
-        console.log(`[parsePackageExcel] Parsed ${packages.length} packages`);
+        if (items.length > 0 || packageTotal > 0) {
+          packages.push({
+            id: `pkg-${si}`,
+            packageName: sheetName,
+            items,
+            totalCost: packageTotal || items.reduce((s, it) => s + it.subtotal, 0),
+            currency: pqMeta.currency || 'CNY',
+          });
+        }
+      });
 
-        setPqProject({
-          projectName: pqMeta.projectName || file.name.replace(/\.[^.]+$/, ''),
-          supplierName: pqMeta.supplierName,
-          sourceFileName: file.name,
-          currency: pqMeta.currency || 'CNY',
-          packages,
-        });
-        setPqParseStatus('done');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[parsePackageExcel]', err);
-        setPqParseError(msg);
-        setPqParseStatus('error');
-      }
-    };
-    reader.onerror = () => { setPqParseError('Failed to read file.'); setPqParseStatus('error'); };
-    reader.readAsArrayBuffer(file);
+      if (packages.length === 0) throw new Error('No packages could be parsed from this Excel file.');
+      console.log(`[parsePackageExcel] Parsed ${packages.length} packages`);
+
+      setPqProject({
+        projectName: pqMeta.projectName || file.name.replace(/\.[^.]+$/, ''),
+        supplierName: pqMeta.supplierName,
+        sourceFileName: file.name,
+        currency: pqMeta.currency || 'CNY',
+        packages,
+      });
+      setPqParseStatus('done');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[parsePackageExcel]', err);
+      setPqParseError(msg);
+      setPqParseStatus('error');
+    }
   };
 
   // ── Package Quote: render ────────────────────────────────────────────────
@@ -1355,7 +1403,7 @@ export default function App() {
                           <table className="w-full text-[12px]">
                             <thead>
                               <tr className="bg-[#0C1B3A] text-white">
-                                {['#','Name','Material / Spec','Qty','Unit','Unit Cost','Subtotal'].map(h => (
+                                {['#','Photo','Name','Material / Spec','Qty','Unit','Unit Cost','Subtotal'].map(h => (
                                   <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider first:rounded-tl-[16px] last:rounded-tr-[16px]">{h}</th>
                                 ))}
                               </tr>
@@ -1364,6 +1412,12 @@ export default function App() {
                               {areaItems.map((it, i) => (
                                 <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
                                   <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono">{it.seq}</td>
+                                  <td className="px-3 py-2">
+                                    {it.imageDataUrl
+                                      ? <img src={it.imageDataUrl} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-[#0C1B3A]/10" />
+                                      : <div className="w-12 h-12 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[10px]">—</div>
+                                    }
+                                  </td>
                                   <td className="px-3 py-2 font-bold text-[#0C1B3A]">{it.name}</td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[200px]">
                                     <div>{it.material}</div>
@@ -1378,7 +1432,7 @@ export default function App() {
                             </tbody>
                             <tfoot>
                               <tr className="bg-[#0C1B3A]/5 border-t border-[#0C1B3A]/8">
-                                <td colSpan={6} className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#0C1B3A]/40 text-right">Area Total</td>
+                                <td colSpan={7} className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#0C1B3A]/40 text-right">Area Total</td>
                                 <td className="px-3 py-2 text-right font-mono font-black text-[#0C1B3A]">
                                   {areaItems.reduce((s, it) => s + it.subtotal, 0).toLocaleString()}
                                 </td>
