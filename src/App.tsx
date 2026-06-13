@@ -2616,6 +2616,7 @@ Return ONLY valid JSON:
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
+        console.log('[REAL_EXCEL_PARSER] SheetNames:', workbook.SheetNames);
         
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
           throw new Error('No sheets found in Excel file.');
@@ -2723,26 +2724,30 @@ Return ONLY valid JSON:
         if (appMode === 'supplier-quote') {
           // ── Supplier Quote mode: auto-process without mapping dialog ──────
           // No Gemini involved. Parse immediately and show items.
+          // Allow any price column (AED, CNY, USD, etc.) — do not require AED column name
+          // mappings.price === -1 just means no keyword match; autoMappings falls back to col 4 which is fine
           if (mappings.price === -1) {
-            const msg = 'AED price not found. Please ensure the Excel file contains a price column in AED.';
-            setSqParseError(msg);
-            setSqParseStatus('error');
-            alert(`❌ ${msg}`);
-            return;
+            console.warn('[parseExcel] No named price column found, using fallback column', autoMappings.price);
           }
           const dataRows = jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1);
+          console.log('[parseExcel] mappings:', mappings, '| autoMappings:', autoMappings, '| bestHeaderRowIndex:', bestHeaderRowIndex);
           const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
+          const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','合价','grand'];
+          const NOTE_PREFIXES = ['注：','注:','备注','note:','note：','*','（注','(注'];
           const rows: any[] = [];
           dataRows.forEach((row: any, idx: number) => {
             const name = String(row[autoMappings.item] || '').trim();
             const nameLower = name.toLowerCase();
             if (!name || name === '0') return;
-            const isHeader = nameLower.includes('item') || nameLower.includes('品名');
+            const isHeader = nameLower.includes('item') || nameLower.includes('品名') || nameLower.includes('产品名称') || nameLower.includes('furniture item');
             const isSerial = /^\d+$/.test(name) || ['no','no.','s.no','序号','编号','sn'].includes(nameLower) || (name.length < 2 && /^\d$/.test(name));
             if (isHeader || isSerial) return;
-            // Skip summary/total rows — they are not product items
-            const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计'];
-            if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
+            // Skip summary/total rows
+            if (SKIP_ROW_WORDS.some(k => nameLower.trim() === k.toLowerCase() || nameLower.trim().startsWith(k.toLowerCase() + ' ') || nameLower.trim().startsWith(k.toLowerCase() + '：') || nameLower.trim().startsWith(k.toLowerCase() + ':'))) return;
+            // Skip Chinese note/remark rows
+            if (NOTE_PREFIXES.some(p => name.startsWith(p))) return;
+            // Skip rows that look like numbered continuation notes (e.g. "2、以上价为出厂价")
+            if (/^[1-9一二三四五六七八九][、。．,.]\s*/.test(name)) return;
             const isTerm = TERM_KEYWORDS.some(k => nameLower.includes(k));
             if (isTerm) {
               const termVal = String(row[autoMappings.spec] || row[autoMappings.price] || '').trim();
