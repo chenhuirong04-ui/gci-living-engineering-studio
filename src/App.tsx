@@ -319,6 +319,12 @@ export default function App() {
   const [pqParseError, setPqParseError] = useState<string>('');
   const [pqExpanded, setPqExpanded] = useState<Set<string>>(new Set());
   const [pqMeta, setPqMeta] = useState({ projectName: '', supplierName: '', currency: 'CNY' });
+  // Phase 2: GCI Package Quote Preview
+  const [pqPhase, setPqPhase] = useState<'upload' | 'preview'>('upload');
+  const [pqQuoteCurrency, setPqQuoteCurrency] = useState<'AED' | 'USD'>('AED');
+  const [pqExchangeRate, setPqExchangeRate] = useState<number>(0.505); // default CNY→AED
+  const [pqMarkups, setPqMarkups] = useState<Record<string, number>>({}); // pkg.id → markup %
+  const [pqPreviewExpanded, setPqPreviewExpanded] = useState<Set<string>>(new Set());
   // Navigation source — tracks where user came from when entering Pricing Review
   const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | 'gci-history' | null>(null);
   const [sqSourceId, setSqSourceId] = useState<string | null>(null); // supplier quote id for back nav
@@ -990,11 +996,202 @@ export default function App() {
   };
 
   // ── Package Quote: render ────────────────────────────────────────────────
-  const renderPackageQuote = () => (
+  const renderPackageQuote = () => {
+    // ── Phase 2: GCI Package Quote Preview ───────────────────────────────
+    if (pqPhase === 'preview' && pqProject) {
+      const baseCur = pqProject.currency;
+      const rate = pqExchangeRate;
+
+      return (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest flex-wrap">
+            <button onClick={() => { setAppMode('landing'); setPqProject(null); setPqParseStatus('idle'); setPqPhase('upload'); }}
+              className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Workflow Home</button>
+            <span className="text-[#0C1B3A]/20">›</span>
+            <button onClick={() => setPqPhase('upload')} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Package Quote</button>
+            <span className="text-[#0C1B3A]/20">›</span>
+            <span className="text-[#0C1B3A]/50">{pqProject.projectName}</span>
+            <span className="text-[#0C1B3A]/20">›</span>
+            <span className="text-[#C9A84C]">GCI Package Quote</span>
+          </div>
+
+          {/* Config row: Quote Currency + Exchange Rate */}
+          <div className="bg-[#0C1B3A]/3 rounded-[24px] p-6">
+            <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50 mb-4">Quote Settings</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Project</label>
+                <p className="text-sm font-bold text-[#0C1B3A]">{pqProject.projectName}</p>
+                <p className="text-[11px] text-[#0C1B3A]/40">{pqProject.supplierName}</p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Quote Currency</label>
+                <div className="flex gap-2">
+                  {(['AED','USD'] as const).map(c => (
+                    <button key={c} onClick={() => {
+                      setPqQuoteCurrency(c);
+                      const r = baseCur === 'CNY' ? (c === 'AED' ? 0.505 : 0.1375)
+                               : baseCur === 'USD' ? (c === 'AED' ? 3.6725 : 1)
+                               : baseCur === 'EUR' ? (c === 'AED' ? 4.0 : 1.09)
+                               : baseCur === 'GBP' ? (c === 'AED' ? 4.67 : 1.27)
+                               : 1;
+                      setPqExchangeRate(r);
+                    }}
+                      className={`px-4 py-2 rounded-xl text-[12px] font-black uppercase tracking-wider transition-all ${pqQuoteCurrency === c ? 'bg-[#0C1B3A] text-[#C9A84C]' : 'bg-white border border-[#0C1B3A]/10 text-[#0C1B3A]/50 hover:border-[#C9A84C]'}`}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">
+                  Exchange Rate&nbsp;
+                  <span className="normal-case font-medium text-[#0C1B3A]/30">1 {baseCur} =</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={0} step={0.0001}
+                    value={pqExchangeRate}
+                    onChange={e => setPqExchangeRate(parseFloat(e.target.value) || 0)}
+                    className="w-32 px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-mono font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors"
+                  />
+                  <span className="text-sm font-bold text-[#0C1B3A]/50">{pqQuoteCurrency}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Package cards */}
+          <div className="space-y-4">
+            {pqProject.packages.map(pkg => {
+              const markup = pqMarkups[pkg.id] ?? 0;
+              const convertedCost = pkg.totalCost * rate;
+              const gciPrice = convertedCost * (1 + markup / 100);
+              const isOpen = pqPreviewExpanded.has(pkg.id);
+              const toggle = () => setPqPreviewExpanded(prev => {
+                const next = new Set(prev);
+                isOpen ? next.delete(pkg.id) : next.add(pkg.id);
+                return next;
+              });
+
+              return (
+                <div key={pkg.id} className="border border-[#0C1B3A]/8 rounded-[24px] overflow-hidden">
+                  {/* Package summary row */}
+                  <div className="px-6 py-4 bg-[#0C1B3A]/2 flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-2 h-2 rounded-full bg-[#C9A84C] shrink-0" />
+                      <span className="font-black text-[#0C1B3A] truncate">{pkg.packageName}</span>
+                      <span className="text-[11px] text-[#0C1B3A]/30 shrink-0">{pkg.items.length} items</span>
+                    </div>
+                    {/* Cost columns */}
+                    <div className="flex items-center gap-6 text-right">
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-wider text-[#0C1B3A]/30">Original</p>
+                        <p className="text-[13px] font-mono font-bold text-[#0C1B3A]/60">{baseCur} {pkg.totalCost.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-wider text-[#0C1B3A]/30">Converted</p>
+                        <p className="text-[13px] font-mono font-bold text-[#0C1B3A]">{pqQuoteCurrency} {convertedCost.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                      </div>
+                      {/* Markup input */}
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[9px] font-black uppercase tracking-wider text-[#0C1B3A]/30 w-12">Markup</p>
+                        <input
+                          type="number" min={0} max={999} step={1}
+                          value={markup}
+                          onChange={e => setPqMarkups(prev => ({ ...prev, [pkg.id]: parseFloat(e.target.value) || 0 }))}
+                          className="w-16 px-2 py-1 rounded-lg border border-[#0C1B3A]/10 text-sm font-bold text-center text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors"
+                        />
+                        <span className="text-sm text-[#0C1B3A]/40">%</span>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-wider text-[#C9A84C]">GCI Price</p>
+                        <p className="text-[15px] font-mono font-black text-[#0C1B3A]">{pqQuoteCurrency} {gciPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                      </div>
+                      <button onClick={toggle} className="text-[#0C1B3A]/25 hover:text-[#C9A84C] transition-colors text-lg ml-2">
+                        {isOpen ? '▲' : '▼'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Item detail table */}
+                  {isOpen && (
+                    <div className="px-6 pb-5 pt-3">
+                      <div className="overflow-x-auto rounded-[16px] border border-[#0C1B3A]/6">
+                        <table className="w-full text-[12px]">
+                          <thead>
+                            <tr className="bg-[#0C1B3A] text-white">
+                              {['#','Area','Name','Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
+                                <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pkg.items.map((it, i) => {
+                              const itemConverted = it.unitCost * rate * (1 + markup / 100);
+                              return (
+                                <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono">{it.seq}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{it.area}</td>
+                                  <td className="px-3 py-2 font-bold text-[#0C1B3A]">{it.name}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[150px] truncate">{it.spec || it.material}</td>
+                                  <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{it.unit}</td>
+                                  <td className="px-3 py-2 text-right font-mono text-[#0C1B3A]/70">{it.unitCost.toLocaleString()}</td>
+                                  <td className="px-3 py-2 text-right font-mono font-bold text-[#0C1B3A]">{itemConverted.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Grand total */}
+          {(() => {
+            const totalConverted = pqProject.packages.reduce((s, p) => s + p.totalCost * rate, 0);
+            const totalGCI = pqProject.packages.reduce((s, p) => {
+              const m = pqMarkups[p.id] ?? 0;
+              return s + p.totalCost * rate * (1 + m / 100);
+            }, 0);
+            return (
+              <div className="flex justify-end pt-2">
+                <div className="bg-[#0C1B3A] text-white rounded-[24px] px-8 py-5 space-y-2 text-right min-w-[280px]">
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Total Cost ({baseCur} → {pqQuoteCurrency})</p>
+                  <p className="text-sm font-mono text-white/60">{pqQuoteCurrency} {totalConverted.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                  <div className="border-t border-white/10 pt-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]">GCI Total Selling Price</p>
+                    <p className="text-2xl font-black text-[#C9A84C]">{pqQuoteCurrency} {totalGCI.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
+                  </div>
+                  <p className="text-[10px] opacity-30">{pqProject.packages.length} packages · {pqProject.packages.reduce((s,p)=>s+p.items.length,0)} items</p>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Phase 3 placeholder */}
+          <div className="text-center pt-2">
+            <div className="inline-flex items-center gap-2 bg-[#C9A84C]/8 border border-[#C9A84C]/20 rounded-2xl px-6 py-3">
+              <span className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/70">Phase 3 Coming</span>
+              <span className="text-[11px] text-[#0C1B3A]/40">Supabase Save · History Center · PDF Export</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Phase 1: Upload + Package Review ─────────────────────────────────
+    return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest">
-        <button onClick={() => { setAppMode('landing'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
+        <button onClick={() => { setAppMode('landing'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); setPqPhase('upload'); }}
           className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
           Workflow Home
         </button>
@@ -1215,17 +1412,31 @@ export default function App() {
             </div>
           </div>
 
-          {/* Phase 2 placeholder */}
+          {/* Generate GCI Package Quote */}
           <div className="text-center pt-4">
-            <div className="inline-flex items-center gap-2 bg-[#C9A84C]/8 border border-[#C9A84C]/20 rounded-2xl px-6 py-3">
-              <span className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/70">Phase 2 Coming</span>
-              <span className="text-[11px] text-[#0C1B3A]/40">Exchange Rate · Markup · GCI Package Quote Preview</span>
-            </div>
+            <button
+              onClick={() => {
+                // Set default exchange rate based on base currency
+                const base = pqProject?.currency || 'CNY';
+                const defaultRate = base === 'CNY' ? 0.505 : base === 'USD' ? 3.6725 : base === 'EUR' ? 4.0 : base === 'GBP' ? 4.67 : 1;
+                setPqExchangeRate(defaultRate);
+                // Init markups to 0 for each package
+                const initMarkups: Record<string, number> = {};
+                pqProject?.packages.forEach(p => { initMarkups[p.id] = 0; });
+                setPqMarkups(initMarkups);
+                setPqPreviewExpanded(new Set());
+                setPqPhase('preview');
+              }}
+              className="px-10 py-4 rounded-[20px] bg-[#0C1B3A] text-white text-[13px] font-black uppercase tracking-widest hover:bg-[#C9A84C] transition-colors shadow-lg"
+            >
+              Generate GCI Package Quote →
+            </button>
           </div>
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // ── Supplier Quote Upload flow ───────────────────────────────────────────
   const renderSupplierQuoteUpload = () => (
