@@ -327,6 +327,7 @@ export default function App() {
   const [pqExchangeRate, setPqExchangeRate] = useState<number>(0.505); // default CNY→AED
   const [pqMarkups, setPqMarkups] = useState<Record<string, number>>({}); // pkg.id → markup %
   const [pqPreviewExpanded, setPqPreviewExpanded] = useState<Set<string>>(new Set());
+  const [pqSelectedPkgs, setPqSelectedPkgs] = useState<Set<string>>(new Set());
   const [pqCustomer, setPqCustomer] = useState('');
   const [pqQuoteNo, setPqQuoteNo] = useState(() => {
     const d = new Date();
@@ -1503,19 +1504,29 @@ export default function App() {
               const convertedCost = pkg.totalCost * rate;
               const gciPrice = convertedCost * (1 + markup / 100);
               const isOpen = pqPreviewExpanded.has(pkg.id);
+              const isSelected = pqSelectedPkgs.has(pkg.id);
               const toggle = () => setPqPreviewExpanded(prev => {
                 const next = new Set(prev);
                 isOpen ? next.delete(pkg.id) : next.add(pkg.id);
                 return next;
               });
+              const toggleSelect = () => setPqSelectedPkgs(prev => {
+                const next = new Set(prev);
+                isSelected ? next.delete(pkg.id) : next.add(pkg.id);
+                return next;
+              });
 
               return (
-                <div key={pkg.id} className="border border-[#0C1B3A]/8 rounded-[24px] overflow-hidden">
+                <div key={pkg.id} className={`border rounded-[24px] overflow-hidden transition-opacity ${isSelected ? 'border-[#0C1B3A]/8' : 'border-[#0C1B3A]/4 opacity-40'}`}>
                   {/* Package summary row */}
                   <div className="px-6 py-4 bg-[#0C1B3A]/2 flex flex-wrap items-center gap-4">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-2 h-2 rounded-full bg-[#C9A84C] shrink-0" />
-                      <span className="font-black text-[#0C1B3A] truncate">{pqTranslate(pkg.packageName)}</span>
+                      {/* Checkbox */}
+                      <button onClick={toggleSelect}
+                        className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-[#0C1B3A] border-[#0C1B3A]' : 'border-[#0C1B3A]/20 bg-white'}`}>
+                        {isSelected && <svg className="w-3 h-3 text-[#C9A84C]" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </button>
+                      <span className={`font-black truncate ${isSelected ? 'text-[#0C1B3A]' : 'text-[#0C1B3A]/50'}`}>{pqTranslate(pkg.packageName)}</span>
                       <span className="text-[11px] text-[#0C1B3A]/30 shrink-0">{pkg.items.length} items</span>
                     </div>
                     {/* Cost columns */}
@@ -1595,8 +1606,9 @@ export default function App() {
 
           {/* Grand total */}
           {(() => {
-            const totalConverted = pqProject.packages.reduce((s, p) => s + p.totalCost * rate, 0);
-            const totalGCI = pqProject.packages.reduce((s, p) => {
+            const selectedPkgs = pqProject.packages.filter(p => pqSelectedPkgs.has(p.id));
+            const totalConverted = selectedPkgs.reduce((s, p) => s + p.totalCost * rate, 0);
+            const totalGCI = selectedPkgs.reduce((s, p) => {
               const m = pqMarkups[p.id] ?? 0;
               return s + p.totalCost * rate * (1 + m / 100);
             }, 0);
@@ -1609,7 +1621,7 @@ export default function App() {
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]">GCI Total Selling Price</p>
                     <p className="text-2xl font-black text-[#C9A84C]">{pqQuoteCurrency} {totalGCI.toLocaleString(undefined,{maximumFractionDigits:0})}</p>
                   </div>
-                  <p className="text-[10px] opacity-30">{pqProject.packages.length} packages · {pqProject.packages.reduce((s,p)=>s+p.items.length,0)} items</p>
+                  <p className="text-[10px] opacity-30">{selectedPkgs.length} / {pqProject.packages.length} packages selected · {selectedPkgs.reduce((s,p)=>s+p.items.length,0)} items</p>
                 </div>
               </div>
             );
@@ -1618,7 +1630,10 @@ export default function App() {
           {/* Download Customer PDF */}
           <div className="flex justify-end pt-2">
             <button
-              onClick={() => generatePkgCustomerPdf(pqProject, pqMarkups, pqExchangeRate, pqQuoteCurrency, { customer: pqCustomer, quoteNo: pqQuoteNo, quoteDate: pqQuoteDate, validUntil: pqValidUntil, paymentTerms: pqPaymentTerms, deliveryTerms: pqDeliveryTerms })}
+              onClick={() => {
+                const selectedPkgs = pqProject.packages.filter(p => pqSelectedPkgs.has(p.id));
+                generatePkgCustomerPdf({ ...pqProject, packages: selectedPkgs }, pqMarkups, pqExchangeRate, pqQuoteCurrency, { customer: pqCustomer, quoteNo: pqQuoteNo, quoteDate: pqQuoteDate, validUntil: pqValidUntil, paymentTerms: pqPaymentTerms, deliveryTerms: pqDeliveryTerms });
+              }}
               className="flex items-center gap-2 bg-[#0C1B3A] hover:bg-[#162a52] text-[#C9A84C] font-black text-[12px] uppercase tracking-widest px-6 py-3 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95"
             >
               <Download className="w-4 h-4" />
@@ -1874,6 +1889,8 @@ export default function App() {
                 pqProject?.packages.forEach(p => { initMarkups[p.id] = 0; });
                 setPqMarkups(initMarkups);
                 setPqPreviewExpanded(new Set());
+                // Default: all packages selected
+                setPqSelectedPkgs(new Set(pqProject?.packages.map(p => p.id) ?? []));
                 setPqPhase('preview');
               }}
               className="px-10 py-4 rounded-[20px] bg-[#0C1B3A] text-white text-[13px] font-black uppercase tracking-widest hover:bg-[#C9A84C] transition-colors shadow-lg"
