@@ -329,6 +329,7 @@ export default function App() {
   const [pqPreviewExpanded, setPqPreviewExpanded] = useState<Set<string>>(new Set());
   const [pqSelectedPkgs, setPqSelectedPkgs] = useState<Set<string>>(new Set());
   const [pqCustomer, setPqCustomer] = useState('');
+  const [pqProjectName, setPqProjectName] = useState('');
   const [pqQuoteNo, setPqQuoteNo] = useState(() => {
     const d = new Date();
     return `GCI-PQ-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${Math.floor(100+Math.random()*900)}`;
@@ -1512,8 +1513,14 @@ export default function App() {
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Project</label>
-                <p className="text-sm font-bold text-[#0C1B3A]">{pqProject.projectName}</p>
-                <p className="text-[11px] text-[#0C1B3A]/40">{pqProject.supplierName}</p>
+                <input
+                  type="text"
+                  value={pqProjectName}
+                  onChange={e => setPqProjectName(e.target.value)}
+                  placeholder="Enter project name (English)"
+                  className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors placeholder:text-[#0C1B3A]/20"
+                />
+                <p className="text-[11px] text-[#0C1B3A]/40 mt-1">{pqProject.supplierName}</p>
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Quote Currency</label>
@@ -1725,7 +1732,8 @@ export default function App() {
             <button
               onClick={() => {
                 const selectedPkgs = pqProject.packages.filter(p => pqSelectedPkgs.has(p.id));
-                generatePkgCustomerPdf({ ...pqProject, packages: selectedPkgs }, pqMarkups, pqExchangeRate, pqQuoteCurrency, { customer: pqCustomer, quoteNo: pqQuoteNo, quoteDate: pqQuoteDate, validUntil: pqValidUntil, paymentTerms: pqPaymentTerms, deliveryTerms: pqDeliveryTerms });
+                const safeProjectName = pqProjectName && !hasChinese(pqProjectName) ? pqProjectName : (pqProjectName ? 'Package Project' : 'Package Project');
+                generatePkgCustomerPdf({ ...pqProject, projectName: safeProjectName, packages: selectedPkgs }, pqMarkups, pqExchangeRate, pqQuoteCurrency, { customer: pqCustomer, quoteNo: pqQuoteNo, quoteDate: pqQuoteDate, validUntil: pqValidUntil, paymentTerms: pqPaymentTerms, deliveryTerms: pqDeliveryTerms });
               }}
               className="flex items-center gap-2 bg-[#0C1B3A] hover:bg-[#162a52] text-[#C9A84C] font-black text-[12px] uppercase tracking-widest px-6 py-3 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95"
             >
@@ -1984,6 +1992,7 @@ export default function App() {
                 setPqPreviewExpanded(new Set());
                 // Default: all packages selected
                 setPqSelectedPkgs(new Set(pqProject?.packages.map(p => p.id) ?? []));
+                setPqProjectName(pqProject?.projectName ?? '');
                 setPqPhase('preview');
               }}
               className="px-10 py-4 rounded-[20px] bg-[#0C1B3A] text-white text-[13px] font-black uppercase tracking-widest hover:bg-[#C9A84C] transition-colors shadow-lg"
