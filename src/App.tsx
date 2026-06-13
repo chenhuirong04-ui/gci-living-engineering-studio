@@ -1133,6 +1133,45 @@ export default function App() {
   };
 
   // ── Package Quote: render ────────────────────────────────────────────────
+  // ── Package Quote: CN → EN translation (only for Customer Quote + PDF) ───
+  // Original data is NEVER modified. This runs only at display/PDF time.
+  const PQ_EN: Record<string, string> = {
+    // Areas
+    '客厅':'Living Room','起居室':'Living Room','餐厅':'Dining Room','卧室':'Bedroom',
+    '主卧':'Master Bedroom','主卧室':'Master Bedroom','次卧':'Bedroom 2','次卧室':'Bedroom 2',
+    '儿童房':'Children\'s Room','书房':'Study','厨房':'Kitchen','卫生间':'Bathroom',
+    '主卫':'Master Bathroom','阳台':'Balcony','过道':'Hallway','门厅':'Foyer',
+    '衣帽间':'Walk-in Closet','储藏室':'Storage','公区':'Common Area',
+    // Item names
+    '沙发':'Sofa','单人沙发':'Armchair','双人沙发':'Loveseat','三人沙发':'3-Seat Sofa',
+    'L型沙发':'L-Shape Sofa','茶几':'Coffee Table','边几':'Side Table','角几':'Corner Table',
+    '电视柜':'TV Unit','电视架':'TV Stand','餐桌':'Dining Table','餐椅':'Dining Chair',
+    '吧台':'Bar Counter','吧椅':'Bar Stool','床':'Bed','双人床':'Double Bed',
+    '单人床':'Single Bed','儿童床':'Kids Bed','床头柜':'Bedside Table','床头灯':'Bedside Lamp',
+    '床垫':'Mattress','床尾凳':'Bed Bench','衣柜':'Wardrobe','书柜':'Bookcase',
+    '展示柜':'Display Cabinet','酒柜':'Wine Cabinet','边柜':'Sideboard','斗柜':'Chest of Drawers',
+    '梳妆台':'Dressing Table','书桌':'Desk','办公椅':'Office Chair','椅子':'Chair',
+    '凳子':'Stool','台灯':'Table Lamp','落地灯':'Floor Lamp','吊灯':'Pendant Light',
+    '地毯':'Rug','窗帘':'Curtain','镜子':'Mirror','装饰画':'Wall Art','花盆':'Planter',
+    '换鞋凳':'Entry Bench','鞋柜':'Shoe Cabinet','浴室柜':'Vanity Cabinet',
+    '洗手台':'Vanity','马桶':'Toilet','浴缸':'Bathtub','淋浴房':'Shower Enclosure',
+    // Units
+    '件':'Pcs','套':'Set','张':'Pcs','把':'Pcs','个':'Pcs','条':'Pcs','块':'Pcs',
+    '组':'Set','副':'Pair','双':'Pair','米':'m','平方米':'m²','㎡':'m²',
+  };
+
+  const pqTranslate = (text: string): string => {
+    if (!text) return text;
+    // Exact match first
+    if (PQ_EN[text]) return PQ_EN[text];
+    // Try to replace known substrings
+    let out = text;
+    for (const [cn, en] of Object.entries(PQ_EN)) {
+      out = out.replace(cn, en);
+    }
+    return out;
+  };
+
   // ── Package Quote Customer PDF ────────────────────────────────────────────
   const generatePkgCustomerPdf = (
     project: PkgQuoteProject,
@@ -1216,7 +1255,7 @@ export default function App() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
-      doc.text(pkg.packageName.toUpperCase(), 18, y + 5.5);
+      doc.text(pqTranslate(pkg.packageName).toUpperCase(), 18, y + 5.5);
       doc.setTextColor(...GOLD);
       doc.setFontSize(8.5);
       doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
@@ -1255,15 +1294,15 @@ export default function App() {
         // Name
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...NAVY);
-        doc.text(it.name, txtX + 14, baseY);
+        doc.text(pqTranslate(it.name), txtX + 14, baseY);
 
         // Area
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 115, 140);
-        doc.text(it.area || '', txtX + 68, baseY);
+        doc.text(pqTranslate(it.area || ''), txtX + 68, baseY);
 
         // Spec/material (line 2 if image row)
-        const specTxt = [it.material, it.spec].filter(Boolean).join(' · ');
+        const specTxt = [pqTranslate(it.material), it.spec].filter(Boolean).join(' · ');
         if (it.imageDataUrl && specTxt) {
           doc.setFontSize(6.5);
           doc.setTextColor(130, 145, 165);
@@ -1274,7 +1313,7 @@ export default function App() {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor(...NAVY);
-        doc.text(`${it.qty} ${it.unit}`, PW - 65, baseY, { align: 'right' });
+        doc.text(`${it.qty} ${pqTranslate(it.unit)}`, PW - 65, baseY, { align: 'right' });
 
         // Price
         doc.setFont('helvetica', 'bold');
@@ -1296,7 +1335,7 @@ export default function App() {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(...NAVY);
-      doc.text(`${pkg.packageName} — Package Total`, 18, y + 4.8);
+      doc.text(`${pqTranslate(pkg.packageName)} — Package Total`, 18, y + 4.8);
       doc.setTextColor(...GOLD);
       doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 4.8, { align: 'right' });
       y += 10;
@@ -1476,7 +1515,7 @@ export default function App() {
                   <div className="px-6 py-4 bg-[#0C1B3A]/2 flex flex-wrap items-center gap-4">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className="w-2 h-2 rounded-full bg-[#C9A84C] shrink-0" />
-                      <span className="font-black text-[#0C1B3A] truncate">{pkg.packageName}</span>
+                      <span className="font-black text-[#0C1B3A] truncate">{pqTranslate(pkg.packageName)}</span>
                       <span className="text-[11px] text-[#0C1B3A]/30 shrink-0">{pkg.items.length} items</span>
                     </div>
                     {/* Cost columns */}
@@ -1534,11 +1573,11 @@ export default function App() {
                                       : <div className="w-12 h-12 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[10px]">—</div>
                                     }
                                   </td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{it.area}</td>
-                                  <td className="px-3 py-2 font-bold text-[#0C1B3A]">{it.name}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[150px] truncate">{it.spec || it.material}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.area)}</td>
+                                  <td className="px-3 py-2 font-bold text-[#0C1B3A]">{pqTranslate(it.name)}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[150px] truncate">{pqTranslate(it.spec || it.material)}</td>
                                   <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{it.unit}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.unit)}</td>
                                   <td className="px-3 py-2 text-right font-mono text-[#0C1B3A]/70">{it.unitCost.toLocaleString()}</td>
                                   <td className="px-3 py-2 text-right font-mono font-bold text-[#0C1B3A]">{itemConverted.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
                                 </tr>
