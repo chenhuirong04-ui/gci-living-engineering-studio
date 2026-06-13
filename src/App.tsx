@@ -327,6 +327,17 @@ export default function App() {
   const [pqExchangeRate, setPqExchangeRate] = useState<number>(0.505); // default CNY→AED
   const [pqMarkups, setPqMarkups] = useState<Record<string, number>>({}); // pkg.id → markup %
   const [pqPreviewExpanded, setPqPreviewExpanded] = useState<Set<string>>(new Set());
+  const [pqCustomer, setPqCustomer] = useState('');
+  const [pqQuoteNo, setPqQuoteNo] = useState(() => {
+    const d = new Date();
+    return `GCI-PQ-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}-${Math.floor(100+Math.random()*900)}`;
+  });
+  const [pqQuoteDate, setPqQuoteDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [pqValidUntil, setPqValidUntil] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate()+30); return d.toISOString().slice(0,10);
+  });
+  const [pqPaymentTerms, setPqPaymentTerms] = useState('30% Deposit, 70% Before Shipment');
+  const [pqDeliveryTerms, setPqDeliveryTerms] = useState('45-60 Working Days After Deposit');
   // Navigation source — tracks where user came from when entering Pricing Review
   const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | 'gci-history' | null>(null);
   const [sqSourceId, setSqSourceId] = useState<string | null>(null); // supplier quote id for back nav
@@ -1122,6 +1133,225 @@ export default function App() {
   };
 
   // ── Package Quote: render ────────────────────────────────────────────────
+  // ── Package Quote Customer PDF ────────────────────────────────────────────
+  const generatePkgCustomerPdf = (
+    project: PkgQuoteProject,
+    markups: Record<string, number>,
+    rate: number,
+    currency: 'AED' | 'USD',
+    meta: { customer: string; quoteNo: string; quoteDate: string; validUntil: string; paymentTerms: string; deliveryTerms: string }
+  ) => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const PW = 297; // page width landscape
+    const NAVY = [12, 27, 58] as [number, number, number];
+    const GOLD = [201, 168, 76] as [number, number, number];
+    const LGRAY = [245, 246, 248] as [number, number, number];
+
+    const totalGCI = project.packages.reduce((s, p) => {
+      const m = markups[p.id] ?? 0;
+      return s + p.totalCost * rate * (1 + m / 100);
+    }, 0);
+
+    let y = 0;
+
+    const addHeader = () => {
+      // Navy top bar
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 0, PW, 20, 'F');
+      // Gold accent line
+      doc.setFillColor(...GOLD);
+      doc.rect(0, 20, PW, 1.2, 'F');
+      // Logo / company
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('GCI', 14, 13);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...GOLD);
+      doc.text('GLOBAL CARE INFO', 26, 13);
+      // Title
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text('PACKAGE QUOTATION', PW - 14, 13, { align: 'right' });
+    };
+
+    const addQuoteMeta = () => {
+      // Meta info box
+      doc.setFillColor(...LGRAY);
+      doc.roundedRect(14, 24, PW - 28, 28, 2, 2, 'F');
+      doc.setTextColor(...NAVY);
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      // Left col
+      const lx = 18, rx = PW / 2 + 4;
+      const ly = 29;
+      doc.text('PROJECT', lx, ly); doc.setFont('helvetica', 'normal'); doc.text(project.projectName, lx + 22, ly);
+      doc.setFont('helvetica', 'bold'); doc.text('CUSTOMER', lx, ly + 6); doc.setFont('helvetica', 'normal'); doc.text(meta.customer || '—', lx + 22, ly + 6);
+      doc.setFont('helvetica', 'bold'); doc.text('CURRENCY', lx, ly + 12); doc.setFont('helvetica', 'normal'); doc.text(currency, lx + 22, ly + 12);
+      doc.setFont('helvetica', 'bold'); doc.text('PACKAGES', lx, ly + 18); doc.setFont('helvetica', 'normal'); doc.text(String(project.packages.length), lx + 22, ly + 18);
+      // Right col
+      doc.setFont('helvetica', 'bold'); doc.text('QUOTE NO', rx, ly); doc.setFont('helvetica', 'normal'); doc.text(meta.quoteNo, rx + 22, ly);
+      doc.setFont('helvetica', 'bold'); doc.text('DATE', rx, ly + 6); doc.setFont('helvetica', 'normal'); doc.text(meta.quoteDate, rx + 22, ly + 6);
+      doc.setFont('helvetica', 'bold'); doc.text('VALID UNTIL', rx, ly + 12); doc.setFont('helvetica', 'normal'); doc.text(meta.validUntil, rx + 22, ly + 12);
+      doc.setFont('helvetica', 'bold'); doc.text('TOTAL', rx, ly + 18);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...GOLD);
+      doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, rx + 22, ly + 18);
+      y = 56;
+    };
+
+    addHeader();
+    addQuoteMeta();
+
+    // ── Package sections ─────────────────────────────────────────────────────
+    for (const pkg of project.packages) {
+      const markup = markups[pkg.id] ?? 0;
+      const gciTotal = pkg.totalCost * rate * (1 + markup / 100);
+
+      // Package title band
+      if (y > 175) { doc.addPage(); addHeader(); y = 24; }
+      doc.setFillColor(...NAVY);
+      doc.rect(14, y, PW - 28, 8, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(pkg.packageName.toUpperCase(), 18, y + 5.5);
+      doc.setTextColor(...GOLD);
+      doc.setFontSize(8.5);
+      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
+      y += 10;
+
+      // Items
+      for (const it of pkg.items) {
+        const rowH = it.imageDataUrl ? 18 : 8;
+        if (y + rowH > 195) { doc.addPage(); addHeader(); y = 24; }
+
+        const itemGCI = it.unitCost * rate * (1 + markup / 100) * it.qty;
+        // Alternate row background
+        const rowIdx = pkg.items.indexOf(it);
+        if (rowIdx % 2 === 0) {
+          doc.setFillColor(250, 251, 253);
+          doc.rect(14, y, PW - 28, rowH, 'F');
+        }
+
+        // Photo thumbnail
+        const imgX = 16, txtX = 38;
+        if (it.imageDataUrl) {
+          try {
+            doc.addImage(it.imageDataUrl, 'PNG', imgX, y + 1, 16, 16);
+          } catch { /* skip bad image */ }
+        }
+
+        doc.setTextColor(...NAVY);
+        doc.setFontSize(7.5);
+        const baseY = it.imageDataUrl ? y + 5 : y + 5.5;
+
+        // Seq
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(120, 130, 150);
+        doc.text(it.seq, txtX, baseY);
+
+        // Name
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...NAVY);
+        doc.text(it.name, txtX + 14, baseY);
+
+        // Area
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 115, 140);
+        doc.text(it.area || '', txtX + 68, baseY);
+
+        // Spec/material (line 2 if image row)
+        const specTxt = [it.material, it.spec].filter(Boolean).join(' · ');
+        if (it.imageDataUrl && specTxt) {
+          doc.setFontSize(6.5);
+          doc.setTextColor(130, 145, 165);
+          doc.text(specTxt.slice(0, 80), txtX + 14, baseY + 6);
+        }
+
+        // Qty + Unit
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...NAVY);
+        doc.text(`${it.qty} ${it.unit}`, PW - 65, baseY, { align: 'right' });
+
+        // Price
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...NAVY);
+        doc.text(`${currency} ${itemGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, baseY, { align: 'right' });
+
+        // Light separator
+        doc.setDrawColor(220, 225, 235);
+        doc.setLineWidth(0.2);
+        doc.line(14, y + rowH, PW - 14, y + rowH);
+
+        y += rowH;
+      }
+
+      // Package subtotal row
+      if (y + 8 > 195) { doc.addPage(); addHeader(); y = 24; }
+      doc.setFillColor(230, 235, 245);
+      doc.rect(14, y, PW - 28, 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...NAVY);
+      doc.text(`${pkg.packageName} — Package Total`, 18, y + 4.8);
+      doc.setTextColor(...GOLD);
+      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 4.8, { align: 'right' });
+      y += 10;
+    }
+
+    // ── Summary ───────────────────────────────────────────────────────────────
+    if (y + 30 > 195) { doc.addPage(); addHeader(); y = 24; }
+    y += 4;
+    doc.setFillColor(...NAVY);
+    doc.roundedRect(14, y, PW - 28, 8, 1, 1, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GRAND TOTAL', 18, y + 5.5);
+    doc.setTextColor(...GOLD);
+    doc.setFontSize(10);
+    doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
+    y += 14;
+
+    // ── Terms ─────────────────────────────────────────────────────────────────
+    if (y + 20 > 195) { doc.addPage(); addHeader(); y = 24; }
+    doc.setFillColor(...LGRAY);
+    doc.roundedRect(14, y, PW - 28, 16, 1, 1, 'F');
+    doc.setTextColor(...NAVY);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PAYMENT TERMS', 18, y + 5);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.paymentTerms, 48, y + 5);
+    doc.setFont('helvetica', 'bold'); doc.text('DELIVERY TERMS', 18, y + 11);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.deliveryTerms, 48, y + 11);
+    // Right: GCI contact
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...GOLD);
+    doc.text('Global Care Info', PW - 16, y + 5, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 115, 140);
+    doc.setFontSize(6.5);
+    doc.text('chris@globalcareinfo.com', PW - 16, y + 10, { align: 'right' });
+    doc.text('www.globalcareinfo.com', PW - 16, y + 14.5, { align: 'right' });
+
+    // ── Footer on every page ──────────────────────────────────────────────────
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 202, PW, 8, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`GCI Package Quotation · ${meta.quoteNo} · Confidential`, 14, 207.5);
+      doc.text(`Page ${i} / ${totalPages}`, PW - 14, 207.5, { align: 'right' });
+    }
+
+    const fname = `GCI-Package-Quote-${meta.quoteNo}.pdf`;
+    doc.save(fname);
+  };
+
   const renderPackageQuote = () => {
     // ── Phase 2: GCI Package Quote Preview ───────────────────────────────
     if (pqPhase === 'preview' && pqProject) {
@@ -1142,10 +1372,12 @@ export default function App() {
             <span className="text-[#C9A84C]">GCI Package Quote</span>
           </div>
 
-          {/* Config row: Quote Currency + Exchange Rate */}
-          <div className="bg-[#0C1B3A]/3 rounded-[24px] p-6">
-            <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50 mb-4">Quote Settings</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+          {/* Quote Settings: internal pricing + customer info */}
+          <div className="bg-[#0C1B3A]/3 rounded-[24px] p-6 space-y-6">
+            <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50">Quote Settings</h3>
+
+            {/* Row 1: Project info + Currency + Exchange Rate (internal) */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Project</label>
                 <p className="text-sm font-bold text-[#0C1B3A]">{pqProject.projectName}</p>
@@ -1172,17 +1404,54 @@ export default function App() {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">
-                  Exchange Rate&nbsp;
-                  <span className="normal-case font-medium text-[#0C1B3A]/30">1 {baseCur} =</span>
+                  Exchange Rate&nbsp;<span className="normal-case font-medium text-[#0C1B3A]/30">1 {baseCur} =</span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number" min={0} step={0.0001}
-                    value={pqExchangeRate}
+                  <input type="number" min={0} step={0.0001} value={pqExchangeRate}
                     onChange={e => setPqExchangeRate(parseFloat(e.target.value) || 0)}
-                    className="w-32 px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-mono font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors"
-                  />
+                    className="w-32 px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-mono font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
                   <span className="text-sm font-bold text-[#0C1B3A]/50">{pqQuoteCurrency}</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Reference / Quote No</label>
+                <input type="text" value={pqQuoteNo} onChange={e => setPqQuoteNo(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-mono font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-[#0C1B3A]/6" />
+
+            {/* Row 2: Customer info */}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-3">Customer Information <span className="text-[#0C1B3A]/30 normal-case font-medium tracking-normal">(for PDF only — not shown in cost view)</span></p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Customer Name</label>
+                  <input type="text" value={pqCustomer} onChange={e => setPqCustomer(e.target.value)}
+                    placeholder="e.g. Al Futtaim Group"
+                    className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors placeholder:text-[#0C1B3A]/20" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Quote Date</label>
+                  <input type="date" value={pqQuoteDate} onChange={e => setPqQuoteDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Valid Until</label>
+                  <input type="date" value={pqValidUntil} onChange={e => setPqValidUntil(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-bold text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Payment Terms</label>
+                  <input type="text" value={pqPaymentTerms} onChange={e => setPqPaymentTerms(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+                </div>
+                <div className="sm:col-span-2 space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Delivery Terms</label>
+                  <input type="text" value={pqDeliveryTerms} onChange={e => setPqDeliveryTerms(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
                 </div>
               </div>
             </div>
@@ -1307,12 +1576,15 @@ export default function App() {
             );
           })()}
 
-          {/* Phase 3 placeholder */}
-          <div className="text-center pt-2">
-            <div className="inline-flex items-center gap-2 bg-[#C9A84C]/8 border border-[#C9A84C]/20 rounded-2xl px-6 py-3">
-              <span className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/70">Phase 3 Coming</span>
-              <span className="text-[11px] text-[#0C1B3A]/40">Supabase Save · History Center · PDF Export</span>
-            </div>
+          {/* Download Customer PDF */}
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={() => generatePkgCustomerPdf(pqProject, pqMarkups, pqExchangeRate, pqQuoteCurrency, { customer: pqCustomer, quoteNo: pqQuoteNo, quoteDate: pqQuoteDate, validUntil: pqValidUntil, paymentTerms: pqPaymentTerms, deliveryTerms: pqDeliveryTerms })}
+              className="flex items-center gap-2 bg-[#0C1B3A] hover:bg-[#162a52] text-[#C9A84C] font-black text-[12px] uppercase tracking-widest px-6 py-3 rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95"
+            >
+              <Download className="w-4 h-4" />
+              Download Customer PDF
+            </button>
           </div>
         </div>
       );
