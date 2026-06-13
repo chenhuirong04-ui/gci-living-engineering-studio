@@ -59,7 +59,7 @@ import {
 import { GoogleGenAI, Type } from "@google/genai";
 
 /** Single Gemini model used for ALL AI analysis (text / image / PDF / classification). */
-const GEMINI_MODEL = "gemini-3-flash-preview";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 /** Wrap any promise with a timeout. Rejects with readable message on timeout. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Request'): Promise<T> {
@@ -68,7 +68,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Request'): Pro
     new Promise<T>((_, reject) =>
       setTimeout(() => reject(new Error(
         `${label} timed out after ${ms / 1000}s. ` +
-        `If you are in China, Google AI services may be blocked — try a VPN, or add items manually.`
+        `AI parsing timed out. Please try again or add items manually.`
       )), ms)
     ),
   ]);
@@ -77,10 +77,10 @@ import * as XLSX from 'xlsx';
 import { translations, Language } from './translations';
 import { StepIndicator } from './components/StepIndicator';
 import { TypeSelection, QuoteType } from './components/TypeSelection';
-import { saveQuotation, updateQuotation, loadByQuoteNo, listQuotations, markSentToTrade, QuotationItem, QuotationRecord } from './lib/quotationCloud';
+import { saveQuotation, updateQuotation, loadByQuoteNo, listQuotations, markSentToTrade, deleteQuotation, QuotationItem, QuotationRecord } from './lib/quotationCloud';
 import {
   saveSupplierQuote, listSupplierQuotes, loadSupplierQuote, markSupplierQuoteConverted,
-  generateSupplierQuoteNo, SupplierQuote, SupplierQuoteItem,
+  deleteSupplierQuote, generateSupplierQuoteNo, SupplierQuote, SupplierQuoteItem,
 } from './lib/supplierQuoteCloud';
 import { 
   BedSize, 
@@ -205,6 +205,11 @@ interface DraftItem {
   isSplittable?: boolean;
   specOverride?: string;
   notes?: string;
+  includeInGCI?: boolean;
+  // Supplier original cost — preserved across currency conversion
+  originalUnitCost?: number;
+  originalCurrency?: string;
+  originalTotal?: number;
 }
 
 const SOFA_TYPES = [
@@ -256,6 +261,10 @@ export default function App() {
   const [quoteGenerated, setQuoteGenerated] = useState(false);
   const [tradeTerms, setTradeTerms] = useState<string>(''); // extracted terms / notes from supplier quote
   const [sentToTrade, setSentToTrade] = useState(false);    // flow completion flag
+  // Currency & exchange rate modal
+  const [showCurrencyModal, setShowCurrencyModal] = useState(false);
+  const [pendingConversionItems, setPendingConversionItems] = useState<DraftItem[]>([]);
+  const [rateConfig, setRateConfig] = useState<{ quoteCurrency: string; rate: number }>({ quoteCurrency: 'AED', rate: 1 });
   const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
   // Cloud save state
   const [cloudId, setCloudId] = useState<string | null>(null);
@@ -275,7 +284,7 @@ export default function App() {
   const [sqParseStatus, setSqParseStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
   const [sqParseError, setSqParseError] = useState<string>('');
   // Navigation source — tracks where user came from when entering Pricing Review
-  const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | null>(null);
+  const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | 'gci-history' | null>(null);
   const [sqSourceId, setSqSourceId] = useState<string | null>(null); // supplier quote id for back nav
   const [packageItems, setPackageItems] = useState<PackageItem[]>([]);
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
@@ -765,7 +774,7 @@ export default function App() {
         const src = items[i];
         if (!src) return;
         newSelling[draft.id] = src.selling_price;
-        newMarkup[draft.id] = src.supplier_cost > 0
+        newMarkup[draft.id] = (src.selling_price > 0 && src.supplier_cost > 0)
           ? Number(((src.selling_price / src.supplier_cost - 1) * 100).toFixed(1)) : 0;
         newCurrency[draft.id] = src.currency || 'AED';
         newNotes[draft.id] = src.item_notes || '';
@@ -796,6 +805,7 @@ export default function App() {
 
       setLoadStatus('idle');
       setLoadQuoteNo('');
+      setQuoteSource('gci-history');
       setView('configurator'); // switch from history to the loaded quote
     } catch (e) {
       console.error('[Cloud Load] Error:', e);
@@ -871,6 +881,37 @@ export default function App() {
               className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
             />
           </div>
+        </div>
+      </div>
+
+      {/* GCI Quote Info */}
+      <div className="bg-white rounded-[28px] border border-[#0C1B3A]/8 p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#0C1B3A' }}>
+            <FileText className="w-4 h-4 text-[#C9A84C]" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-[#0C1B3A]">GCI Quote Info</h3>
+            <p className="text-[11px] text-[#0C1B3A]/40">客户信息 · Convert to GCI Quote 后自动带入</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          {[
+            { key: 'customerProjectName', label: 'Customer / Project', placeholder: 'e.g. Al Nahyan Villa FF&E' },
+            { key: 'salesperson', label: 'Salesperson', placeholder: 'e.g. Chris' },
+            { key: 'phoneWhatsApp', label: 'Phone / WA', placeholder: '+971 50 000 0000' },
+          ].map(f => (
+            <div key={f.key}>
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">{f.label}</label>
+              <input
+                type="text"
+                value={(quoteInfo as any)[f.key] || ''}
+                placeholder={f.placeholder}
+                onChange={e => setQuoteInfo(prev => ({ ...prev, [f.key]: e.target.value }))}
+                className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+              />
+            </div>
+          ))}
         </div>
       </div>
 
@@ -1019,22 +1060,30 @@ export default function App() {
           {/* Editable table — same structure as Trade & Sourcing */}
           <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
             <div className="grid grid-cols-12 gap-3 px-6 py-3 bg-[#0C1B3A] text-white text-[10px] font-black uppercase tracking-wider">
-              <div className="col-span-4">Item Name</div>
-              <div className="col-span-3">Spec</div>
+              <div className="col-span-1 text-center">GCI</div>
+              <div className="col-span-3">Item Name</div>
+              <div className="col-span-2">Spec</div>
               <div className="col-span-1 text-center">Qty</div>
               <div className="col-span-1 text-center">Unit</div>
               <div className="col-span-2 text-right">Unit Cost</div>
-              <div className="col-span-1 text-right">Total</div>
+              <div className="col-span-2 text-right">Total</div>
             </div>
             <div className="divide-y divide-[#0C1B3A]/6">
-              {draftItems.map((item, idx) => (
-                <div key={item.id} className="grid grid-cols-12 gap-3 px-6 py-3 items-center group">
-                  <div className="col-span-4">
+              {draftItems.map((item, idx) => {
+                const included = item.includeInGCI !== false;
+                return (
+                <div key={item.id} className={`grid grid-cols-12 gap-3 px-6 py-3 items-center group transition-opacity ${included ? '' : 'opacity-40'}`}>
+                  <div className="col-span-1 flex justify-center">
+                    <input type="checkbox" checked={included}
+                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, includeInGCI: e.target.checked } : it))}
+                      className="w-4 h-4 accent-[#C9A84C] cursor-pointer" />
+                  </div>
+                  <div className="col-span-3">
                     <input value={item.originalName}
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalName: e.target.value } : it))}
                       className="w-full text-[14px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1 transition-colors" />
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-2">
                     <input value={item.originalSpec || ''} placeholder="—"
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalSpec: e.target.value } : it))}
                       className="w-full text-[13px] text-[#0C1B3A]/55 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 transition-colors placeholder:text-[#0C1B3A]/20" />
@@ -1054,7 +1103,7 @@ export default function App() {
                       onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value)||0, targetTotal: (Number(e.target.value)||0) * it.quantity } : it))}
                       className="w-full text-right text-[14px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
                   </div>
-                  <div className="col-span-1 text-right flex items-center justify-end gap-2">
+                  <div className="col-span-2 text-right flex items-center justify-end gap-2">
                     <p className="text-[14px] font-black font-mono text-[#0C1B3A]">{(item.targetUnitPrice * item.quantity).toFixed(2)}</p>
                     <button onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
                       className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
@@ -1062,7 +1111,8 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="px-6 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
               <button onClick={() => setDraftItems(prev => [...prev, { id: `sq-new-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER }])}
@@ -1115,9 +1165,14 @@ export default function App() {
               {/* PRIMARY: Convert to GCI Quote */}
               <button
                 onClick={() => {
-                  if (!savedSQId) return;
-                  // Convert directly using the saved ID without going through History
-                  handleCreateGCIQuoteFromSupplier({ id: savedSQId, status: 'Active', currency: supplierMeta.currency || 'AED', total_cost: draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0), supplier_quote_no: '', supplier_name: supplierMeta.supplierName } as SupplierQuote);
+                  const included = draftItems.filter(it => it.includeInGCI !== false);
+                  if (included.length === 0) { alert('Please select at least one item to create GCI Quote.'); return; }
+                  // Gate: show currency & exchange rate confirmation before entering Pricing Review
+                  const supplierCur = supplierMeta.currency || 'AED';
+                  const defaultRate = DEFAULT_RATES[supplierCur]?.['AED'] ?? 1;
+                  setPendingConversionItems(included);
+                  setRateConfig({ quoteCurrency: 'AED', rate: defaultRate });
+                  setShowCurrencyModal(true);
                 }}
                 disabled={!savedSQId}
                 className="w-full py-5 rounded-[24px] font-black uppercase tracking-widest text-[14px] transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl"
@@ -1175,8 +1230,8 @@ export default function App() {
         description: it.originalSpec || '',
         qty: it.quantity,
         unit: it.unit,
-        supplier_cost: it.targetUnitPrice,
-        currency: tradeItemCurrencies[it.id] || 'AED',
+        supplier_cost: it.originalUnitCost ?? it.targetUnitPrice,
+        currency: it.originalCurrency || supplierMeta.currency || 'AED',
         notes: tradeItemNotes[it.id] || '',
         sort_order: i,
       }));
@@ -2511,6 +2566,48 @@ Return ONLY valid JSON:
     }
   };
 
+  // Default conservative exchange rates: supplierCurrency → quoteCurrency
+  const DEFAULT_RATES: Record<string, Record<string, number>> = {
+    AED: { AED: 1.0,    USD: 0.2723 },
+    USD: { AED: 3.6725, USD: 1.0    },
+    CNY: { AED: 0.505,  USD: 0.1375 },
+    EUR: { AED: 4.00,   USD: 1.09   },
+    GBP: { AED: 4.67,   USD: 1.27   },
+  };
+
+  // Called when user confirms Currency & Exchange Rate modal
+  const handleConfirmRate = () => {
+    const { quoteCurrency, rate } = rateConfig;
+    const converted = pendingConversionItems.map(it => {
+      const origCost = it.originalUnitCost ?? it.targetUnitPrice;
+      const convertedUnit = Number((origCost * rate).toFixed(4));
+      return {
+        ...it,
+        targetUnitPrice: convertedUnit,
+        targetTotal: Number((convertedUnit * it.quantity).toFixed(4)),
+      };
+    });
+    const newCurrencies: Record<string, string> = {};
+    const newNotes: Record<string, string> = {};
+    converted.forEach(it => { newCurrencies[it.id] = quoteCurrency; newNotes[it.id] = it.notes || ''; });
+    setDraftItems(converted);
+    setTradeItemCurrencies(newCurrencies);
+    setTradeItemNotes(newNotes);
+    setSellingPrices({});
+    setMarkupPercents({});
+    setQuoteGenerated(false);
+    setSentToTrade(false);
+    setQuoteSource('supplier-archive');
+    setSqSourceId(savedSQId);
+    setQuoteType('trade');
+    setQuoteMode('package');
+    setTradePhase('pricing');
+    setProjectInfoSubmitted(true);
+    setAppMode('customer-quote');
+    setView('configurator');
+    setShowCurrencyModal(false);
+  };
+
   const parseExcel = async (file: File) => {
     setIsProcessingAI(true);
     const reader = new FileReader();
@@ -2524,7 +2621,28 @@ Return ONLY valid JSON:
           throw new Error('No sheets found in Excel file.');
         }
 
-        const firstSheetName = workbook.SheetNames[0];
+        // Multi-sheet: skip summary sheets, pick product detail sheet with most rows
+        const SKIP_SHEET_WORDS = ['summary', 'total', 'totals', '总表', '汇总', '合计', '总计', 'overview', '汇总表'];
+        console.log('[parseExcel] All sheets:', workbook.SheetNames);
+        const skippedSheets = workbook.SheetNames.filter(n =>
+          SKIP_SHEET_WORDS.some(k => n.toLowerCase().trim().includes(k))
+        );
+        const sheetCandidates = workbook.SheetNames.filter(n =>
+          !SKIP_SHEET_WORDS.some(k => n.toLowerCase().trim().includes(k))
+        );
+        console.log('[parseExcel] Skipped sheets:', skippedSheets);
+        console.log('[parseExcel] Candidate sheets:', sheetCandidates);
+        // If all sheets are skipped keywords, fall back to all sheets
+        const sheetsToTry = sheetCandidates.length > 0 ? sheetCandidates : workbook.SheetNames;
+        let firstSheetName = sheetsToTry[0];
+        let maxRows = 0;
+        for (const sn of sheetsToTry) {
+          const rows = (XLSX.utils.sheet_to_json(workbook.Sheets[sn], { header: 1 }) as any[][])
+            .filter(r => r.some(c => c !== null && c !== undefined && String(c).trim() !== ''));
+          console.log(`[parseExcel] Sheet "${sn}" has ${rows.length} data rows`);
+          if (rows.length > maxRows) { maxRows = rows.length; firstSheetName = sn; }
+        }
+        console.log('[parseExcel] Selected sheet:', firstSheetName);
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { header: 1 });
 
@@ -2622,6 +2740,9 @@ Return ONLY valid JSON:
             const isHeader = nameLower.includes('item') || nameLower.includes('品名');
             const isSerial = /^\d+$/.test(name) || ['no','no.','s.no','序号','编号','sn'].includes(nameLower) || (name.length < 2 && /^\d$/.test(name));
             if (isHeader || isSerial) return;
+            // Skip summary/total rows — they are not product items
+            const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计'];
+            if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
             const isTerm = TERM_KEYWORDS.some(k => nameLower.includes(k));
             if (isTerm) {
               const termVal = String(row[autoMappings.spec] || row[autoMappings.price] || '').trim();
@@ -2630,6 +2751,7 @@ Return ONLY valid JSON:
             }
             const unitPrice = parseFloat(String(row[autoMappings.price] || '0').replace(/[^0-9.-]/g, '')) || 0;
             const qty = parseFloat(String(row[autoMappings.qty] || '1').replace(/[^0-9.-]/g, '')) || 1;
+            const supplierCurrencyAtParse = supplierMeta.currency || 'AED';
             rows.push({
               id: `sq-xl-${Date.now()}-${idx}`,
               originalName: name,
@@ -2638,11 +2760,15 @@ Return ONLY valid JSON:
               unit: 'pc',
               targetUnitPrice: unitPrice,
               targetTotal: unitPrice * qty,
+              originalUnitCost: unitPrice,
+              originalCurrency: supplierCurrencyAtParse,
+              originalTotal: unitPrice * qty,
               status: 'Confirmed' as const,
               suggestedCategory: FurnitureCategory.OTHER,
               confidence: 1,
             });
           });
+          console.log('[parseExcel] Final parsed rows:', rows.length, rows.map(r => r.originalName));
           if (rows.length === 0) {
             const msg = 'No items found in Excel. Check that item names and prices are in the correct columns.';
             setSqParseError(msg);
@@ -3193,6 +3319,15 @@ Return ONLY valid JSON:
         setQuoteType(null);
         setQuoteMode(null);
         setAppMode('landing');
+      } else if (quoteSource === 'gci-history') {
+        // Back to History > GCI Quotes
+        setView('history');
+        setHistoryTab('gci');
+        setQuoteSource(null);
+        setTradePhase(null);
+        setQuoteType(null);
+        setQuoteMode(null);
+        setAppMode('landing');
       } else {
         setTradePhase('upload');
       }
@@ -3231,7 +3366,7 @@ Return ONLY valid JSON:
           className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
-          {quoteSource === 'supplier-archive' ? 'Back to Supplier Quote Archive' : 'Back to Cost Items'}
+          {quoteSource === 'supplier-archive' ? 'Back to Supplier Quote Archive' : quoteSource === 'gci-history' ? 'Back to GCI Quotes' : 'Back to Cost Items'}
         </button>
 
         {/* Page title — source-aware */}
@@ -3241,7 +3376,7 @@ Return ONLY valid JSON:
           </span>
         </div>
 
-        <StepIndicator current={4} />
+        <StepIndicator current={sentToTrade ? 6 : quoteGenerated ? 5 : 4} />
 
         {/* Quote Context */}
         <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[20px] px-6 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -3312,6 +3447,8 @@ Return ONLY valid JSON:
                 setSellingPrices(prev => ({ ...prev, [item.id]: val }));
                 if (supplierTotal > 0 && val > 0)
                   setMarkupPercents(prev => ({ ...prev, [item.id]: Number(((val / supplierTotal - 1) * 100).toFixed(1)) }));
+                else
+                  setMarkupPercents(prev => ({ ...prev, [item.id]: 0 }));
               };
               // Rule B: user enters Markup% → calc Selling Total
               const handleMarkupChange = (pct: number) => {
@@ -3345,7 +3482,7 @@ Return ONLY valid JSON:
                   <div className="col-span-1">
                     <input
                       type="number" step="0.1"
-                      value={markupPct || ''}
+                      value={sellPrice > 0 ? (markupPct || '') : ''}
                       placeholder="0%"
                       onChange={e => handleMarkupChange(Number(e.target.value) || 0)}
                       className="w-full text-right bg-[#0C1B3A]/4 border border-[#0C1B3A]/15 rounded-lg px-2 py-1.5 text-[10px] font-black font-mono text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-all"
@@ -3457,6 +3594,29 @@ Return ONLY valid JSON:
                   {cloudId ? '↑ Update Draft' : '💾 Save Draft'}
                 </button>
                 <button onClick={() => setQuoteGenerated(false)} className="text-[9px] text-[#0C1B3A]/30 hover:text-[#0C1B3A] uppercase tracking-widest font-bold transition-colors">← Edit Prices</button>
+              </div>
+            </div>
+
+            {/* Editable Customer Info */}
+            <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 p-5 shadow-sm">
+              <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 mb-4">Customer Info · 可修改后再 Update Draft</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[
+                  { key: 'customerProjectName', label: 'Customer / Project', placeholder: 'e.g. Al Nahyan Villa FF&E' },
+                  { key: 'salesperson', label: 'Salesperson', placeholder: 'e.g. Chris' },
+                  { key: 'phoneWhatsApp', label: 'Phone / WA', placeholder: '+971 50 000 0000' },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1">{f.label}</label>
+                    <input
+                      type="text"
+                      value={(quoteInfo as any)[f.key] || ''}
+                      placeholder={f.placeholder}
+                      onChange={e => setQuoteInfo(prev => ({ ...prev, [f.key]: e.target.value }))}
+                      className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2 text-[13px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C] transition-colors"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -6244,11 +6404,11 @@ Return ONLY valid JSON:
                       <FileText className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Create Customer Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">创建客户报价</p>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Custom Customer Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">定制客户报价</p>
                     </div>
                     <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
-                      Generate GCI quotation for a client. Best for: Custom furniture items (BOM), Engineering BOQ, or Trade & Sourcing with supplier cost markup. Ends with Send to TRADE.
+                      For custom furniture, engineering BOQ, or manual item quotation. 用于家具定制、工程BOQ、手工录入报价。
                     </p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Start →</p>
                   </button>
@@ -6261,11 +6421,11 @@ Return ONLY valid JSON:
                       <Archive className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Save Supplier Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">保存供应商报价</p>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Supplier Quote to GCI Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">供应商报价转 GCI 报价</p>
                     </div>
                     <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
-                      Upload supplier quote (PDF/Excel/image). AI extracts cost items. Save to Supplier Quote Archive. No client info required.
+                      Upload supplier Excel/PDF, extract cost items, add margin, and generate GCI customer quote. 上传供应商报价，读取成本，加价后生成 GCI 客户报价。
                     </p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Save to Archive →</p>
                   </button>
@@ -6278,11 +6438,11 @@ Return ONLY valid JSON:
                       <History className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">History Center</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">历史中心</p>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Quote History & Archive</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">报价历史与档案</p>
                     </div>
                     <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
-                      View Supplier Quotes archive and GCI Customer Quotes. Click any record to continue or convert.
+                      View supplier quote archive and GCI customer quote records. Continue editing or convert when needed. 查看供应商报价与 GCI 客户报价记录，可继续编辑或转换。
                     </p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Open →</p>
                   </button>
@@ -6375,6 +6535,22 @@ Return ONLY valid JSON:
                                 ✓ Converted
                               </div>
                             )}
+                            <button
+                              onClick={async () => {
+                                if (!sq.id) return;
+                                const ok = window.confirm(`Delete Supplier Quote?\n\nThis will delete:\n• supplier quote\n• supplier quote items\n\nThis action cannot be undone.`);
+                                if (!ok) return;
+                                const success = await deleteSupplierQuote(sq.id);
+                                if (success) {
+                                  setSupplierQuotes(prev => prev.filter(q => q.id !== sq.id));
+                                } else {
+                                  alert('Delete failed. Please try again.');
+                                }
+                              }}
+                              className="shrink-0 px-3 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider text-red-400 border border-red-200 hover:bg-red-50 transition-all"
+                            >
+                              Delete
+                            </button>
                           </div>
                         );
                       })}
@@ -6428,6 +6604,23 @@ Return ONLY valid JSON:
                             <p className="text-lg font-black font-mono text-[#0C1B3A]">AED {(rec.grand_total || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
                             {rec.margin_percent > 0 && <p className="text-[9px] text-green-600 font-bold">{rec.margin_percent.toFixed(1)}% margin</p>}
                           </div>
+                          <button
+                            onClick={async e => {
+                              e.stopPropagation();
+                              if (!rec.id) return;
+                              const ok = window.confirm(`Delete GCI Quote?\n\nThis will delete:\n• GCI quote\n• quote items\n\nThis action cannot be undone.`);
+                              if (!ok) return;
+                              const success = await deleteQuotation(rec.id);
+                              if (success) {
+                                setCloudHistory(prev => prev.filter(r => r.id !== rec.id));
+                              } else {
+                                alert('Delete failed. Please try again.');
+                              }
+                            }}
+                            className="shrink-0 px-3 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider text-red-400 border border-red-200 hover:bg-red-50 transition-all"
+                          >
+                            Delete
+                          </button>
                           <ChevronRight className="w-5 h-5 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors shrink-0" />
                         </div>
                       );
@@ -6835,6 +7028,112 @@ Return ONLY valid JSON:
             </div>
           )}
         </AnimatePresence>
+
+        {/* ── Currency & Exchange Rate Confirmation Modal ─────────────────── */}
+        {showCurrencyModal && (() => {
+          const supplierCur = supplierMeta.currency || 'AED';
+          const { quoteCurrency, rate } = rateConfig;
+          const isSameCurrency = supplierCur === quoteCurrency;
+          const rateLabel = isSameCurrency
+            ? `No conversion needed — same currency`
+            : `1 ${supplierCur} = ${rate} ${quoteCurrency}`;
+          const exampleCost = pendingConversionItems[0]
+            ? (((pendingConversionItems[0].originalUnitCost ?? pendingConversionItems[0].targetUnitPrice) * rate)).toFixed(2)
+            : '—';
+          const exampleOrig = pendingConversionItems[0]
+            ? (pendingConversionItems[0].originalUnitCost ?? pendingConversionItems[0].targetUnitPrice).toFixed(2)
+            : '—';
+
+          return (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#0C1B3A]/60 backdrop-blur-sm">
+              <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-md mx-4 p-8 space-y-6">
+                {/* Header */}
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] mb-1">Step · Before Pricing</p>
+                  <h2 className="text-xl font-serif italic text-[#0C1B3A]">Currency & Exchange Rate</h2>
+                  <p className="text-[11px] text-[#0C1B3A]/50 mt-1">确认汇率后才能进入定价</p>
+                </div>
+
+                {/* Supplier currency (read-only) */}
+                <div className="bg-[#0C1B3A]/4 rounded-2xl p-4 space-y-1">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Supplier Original Currency 供应商币种</p>
+                  <p className="text-[18px] font-black text-[#0C1B3A]">{supplierCur}</p>
+                </div>
+
+                {/* GCI Quote Currency */}
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block">GCI Quote Currency 报价币种</label>
+                  <select
+                    value={quoteCurrency}
+                    onChange={e => {
+                      const qc = e.target.value;
+                      const newRate = DEFAULT_RATES[supplierCur]?.[qc] ?? 1;
+                      setRateConfig({ quoteCurrency: qc, rate: supplierCur === qc ? 1 : newRate });
+                    }}
+                    className="w-full bg-[#0C1B3A]/4 border border-[#0C1B3A]/10 rounded-xl px-4 py-3 text-[14px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C]"
+                  >
+                    {['AED', 'USD'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Exchange Rate */}
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block">
+                    Exchange Rate 汇率
+                    {!isSameCurrency && <span className="ml-2 text-[#C9A84C] normal-case font-bold">· 可手动修改</span>}
+                  </label>
+                  {isSameCurrency ? (
+                    <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-[13px] font-bold text-green-700">
+                      同币种，无需换算
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] font-bold text-[#0C1B3A]/50 whitespace-nowrap">1 {supplierCur} =</span>
+                      <input
+                        type="number"
+                        min="0.0001"
+                        step="0.0001"
+                        value={rate}
+                        onChange={e => setRateConfig(prev => ({ ...prev, rate: parseFloat(e.target.value) || 1 }))}
+                        className="flex-1 bg-[#0C1B3A]/4 border border-[#C9A84C]/40 rounded-xl px-4 py-3 text-[14px] font-black text-[#0C1B3A] font-mono outline-none focus:border-[#C9A84C]"
+                      />
+                      <span className="text-[12px] font-bold text-[#0C1B3A]/50">{quoteCurrency}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-[#0C1B3A]/40 font-mono pl-1">{rateLabel}</p>
+                </div>
+
+                {/* Preview */}
+                {!isSameCurrency && pendingConversionItems.length > 0 && (
+                  <div className="bg-[#C9A84C]/8 border border-[#C9A84C]/20 rounded-2xl px-4 py-3">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-[#C9A84C] mb-1">Preview · First Item</p>
+                    <p className="text-[12px] text-[#0C1B3A] font-bold truncate">{pendingConversionItems[0].originalName}</p>
+                    <p className="text-[11px] text-[#0C1B3A]/50 mt-0.5 font-mono">
+                      {exampleOrig} {supplierCur} → <span className="text-[#0C1B3A] font-black">{exampleCost} {quoteCurrency}</span>
+                    </p>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowCurrencyModal(false)}
+                    className="flex-1 py-3.5 rounded-[16px] border border-[#0C1B3A]/10 text-[12px] font-black uppercase tracking-widest text-[#0C1B3A]/50 hover:text-[#0C1B3A] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmRate}
+                    className="flex-2 px-8 py-3.5 rounded-[16px] bg-[#C9A84C] text-[#0C1B3A] text-[12px] font-black uppercase tracking-widest shadow-lg hover:bg-[#E8C96A] transition-all active:scale-95"
+                  >
+                    Confirm & Enter Pricing →
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
     </div>
   );

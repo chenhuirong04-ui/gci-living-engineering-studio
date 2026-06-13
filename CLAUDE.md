@@ -159,6 +159,56 @@ It cannot be overridden by task prompts unless the user explicitly says:
 
 ---
 
+## Supplier Quote Currency Rules
+
+> These rules govern all currency handling in the Supplier Quote Import flow.
+> They apply to: `parseExcel()`, `handleSaveSupplierQuote()`, `handleCreateGCIQuoteFromSupplier()`, `renderTradeQuoteReview()`, `handleSendTradeToTrade()`.
+
+### Detection Rules
+
+1. Supplier Quote Import **must NOT default to AED only**. Detect and read whatever currency is in the Excel.
+2. Supported supplier currencies: `AED` / `RMB` / `CNY` / `¥` / `USD` / `$` / `SAR` / `EUR`
+3. If a price column has no explicit currency label (e.g. header is `单价` / `Price` / `Unit Price`), allow reading — but **mark as `Unknown Currency`**.
+4. `Unknown Currency` items **must prompt the user to confirm the currency before Save is allowed**. Save button must be disabled until confirmed.
+
+### Storage Rules
+
+5. System must always store the supplier's original cost data:
+   - `originalUnitCost` — the raw number from the Excel file
+   - `originalCurrency` — the detected or user-confirmed currency code
+
+### Conversion Rules
+
+6. System must support exchange rate conversion:
+   - `originalCurrency → USD` (normalize all supplier costs to USD)
+   - `USD → quoteCurrency` (convert to the customer quote currency)
+7. **Pricing Review must use USD Cost as the cost basis** — never the raw original figure when currencies differ.
+
+### Quote Output Rules
+
+8. Customer Quote currency options: `USD` or `AED` only.
+9. **Forbidden:** Saving RMB / CNY / SAR / EUR directly as AED. Any non-AED cost must be converted before pricing.
+
+### Send to TRADE Rules
+
+10. `handleSendTradeToTrade()` payload must include all four fields:
+    - `originalSupplierCost` — original number
+    - `originalSupplierCurrency` — original currency code
+    - `convertedUSDCost` — USD-normalized cost
+    - `finalQuoteCurrency` — the currency shown to customer
+
+### Isolation Rule
+
+11. Changes to Supplier Quote Import (steps 1–5 above) must **not affect**:
+    - Pricing Review (`renderTradeQuoteReview()`)
+    - GCI Quote Draft generation
+    - Send to TRADE payload structure
+    - PI PDF export (`generateTradePDF()`)
+
+    If a currency change would propagate into any of these — **STOP** and confirm with user first.
+
+---
+
 ## Key File Map (reference only, do not assume unchanged)
 
 | File | Purpose |
@@ -173,4 +223,4 @@ It cannot be overridden by task prompts unless the user explicitly says:
 
 ---
 
-*Last updated: 2026-06 | Maintained by: Chris (GCI)*
+*Last updated: 2026-06-13 | Maintained by: Chris (GCI)*
