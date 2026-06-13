@@ -212,6 +212,36 @@ interface DraftItem {
   originalTotal?: number;
 }
 
+// ── Package Quote (Project → Package → Items) ────────────────────────────────
+interface PkgQuoteItem {
+  id: string;
+  seq: string;       // FU-01
+  area: string;      // 客厅 / 卧室
+  name: string;
+  material: string;
+  spec: string;
+  qty: number;
+  unit: string;
+  unitCost: number;
+  subtotal: number;
+  currency: string;
+  imageFormula?: string; // DISPIMG ID — POC only, not displayed
+}
+interface PkgQuoteGroup {
+  id: string;
+  packageName: string; // Sheet name e.g. "One-Bedroom Basic"
+  items: PkgQuoteItem[];
+  totalCost: number;
+  currency: string;
+}
+interface PkgQuoteProject {
+  projectName: string;
+  supplierName: string;
+  sourceFileName: string;
+  currency: string;
+  packages: PkgQuoteGroup[];
+}
+
 const SOFA_TYPES = [
   '1-seater',
   '2-seater',
@@ -229,7 +259,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
   // Top-level app mode — controls homepage entry point
-  const [appMode, setAppMode] = useState<'landing' | 'customer-quote' | 'supplier-quote'>('landing');
+  const [appMode, setAppMode] = useState<'landing' | 'customer-quote' | 'supplier-quote' | 'package-quote'>('landing');
   // Supplier Quote metadata form
   const [supplierMeta, setSupplierMeta] = useState({
     supplierName: '', supplierContact: '', category: '', currency: 'AED',
@@ -283,6 +313,12 @@ export default function App() {
   const [sqSelectedFile, setSqSelectedFile] = useState<File | null>(null);   // track selected file for display
   const [sqParseStatus, setSqParseStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
   const [sqParseError, setSqParseError] = useState<string>('');
+  // Package Quote state (Phase 1 — local only, no Supabase)
+  const [pqProject, setPqProject] = useState<PkgQuoteProject | null>(null);
+  const [pqParseStatus, setPqParseStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
+  const [pqParseError, setPqParseError] = useState<string>('');
+  const [pqExpanded, setPqExpanded] = useState<Set<string>>(new Set());
+  const [pqMeta, setPqMeta] = useState({ projectName: '', supplierName: '', currency: 'CNY' });
   // Navigation source — tracks where user came from when entering Pricing Review
   const [quoteSource, setQuoteSource] = useState<'customer' | 'supplier-archive' | 'gci-history' | null>(null);
   const [sqSourceId, setSqSourceId] = useState<string | null>(null); // supplier quote id for back nav
@@ -812,6 +848,363 @@ export default function App() {
       setLoadStatus('error');
     }
   };
+
+  // ── Package Quote: parse multi-sheet Excel ──────────────────────────────
+  const parsePackageExcel = (file: File) => {
+    setPqParseStatus('parsing');
+    setPqParseError('');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        console.log('[parsePackageExcel] SheetNames:', workbook.SheetNames);
+
+        const SKIP_WORDS = ['summary','total','totals','总表','汇总','合计','总计','overview','汇总表'];
+        const productSheets = workbook.SheetNames.filter(n =>
+          !SKIP_WORDS.some(k => n.toLowerCase().trim().includes(k))
+        );
+        if (productSheets.length === 0) {
+          throw new Error('No product sheets found. All sheets appear to be summary sheets.');
+        }
+
+        const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','grand'];
+        const NOTE_PREFIXES = ['注：','注:','备注','note:','*','（注','(注'];
+        const packages: PkgQuoteGroup[] = [];
+
+        productSheets.forEach((sheetName, si) => {
+          const ws = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json<any>(ws, { header: 1 });
+          const rows = jsonData.filter((r: any[]) =>
+            Array.isArray(r) && r.some(c => c !== null && c !== undefined && String(c).trim() !== '')
+          );
+
+          // Find header row (must contain 名称/name AND 单价/price keywords)
+          const HDR_ITEM = ['名称','name'];
+          const HDR_PRICE = ['单价','price','单价 '];
+          let headerIdx = -1;
+          for (let i = 0; i < Math.min(rows.length, 8); i++) {
+            const row = rows[i].map((c: any) => String(c || '').toLowerCase().trim());
+            const hasItem = row.some((c: string) => HDR_ITEM.some(k => c.includes(k)));
+            const hasPrice = row.some((c: string) => HDR_PRICE.some(k => c.includes(k)));
+            if (hasItem && hasPrice) { headerIdx = i; break; }
+          }
+          if (headerIdx === -1) {
+            console.warn(`[parsePackageExcel] No header found in sheet "${sheetName}", skipping`);
+            return;
+          }
+
+          const headers = rows[headerIdx].map((h: any) => String(h || '').toLowerCase().replace(/\s+/g, ' ').trim());
+          const findCol = (keys: string[]) => headers.findIndex((h: string) => keys.some(k => h.includes(k)));
+          const colSeq    = findCol(['序号','no.','no ']);
+          const colArea   = findCol(['区域','area']);
+          const colName   = findCol(['名称','name']);
+          const colImg    = findCol(['图片','description','图']);
+          const colMat    = findCol(['材质','material']);
+          const colSpec   = findCol(['规格','size','spec']);
+          const colQty    = findCol(['数量','quantity','qty']);
+          const colUnit   = findCol(['单位','unit']);
+          const colPrice  = findCol(['单价','price']);
+          const colSub    = findCol(['小计','sub total','subtotal','合计']);
+
+          // Detect package total from 总计 row
+          let packageTotal = 0;
+          const dataRows = rows.slice(headerIdx + 1);
+          const totalRow = dataRows.find((r: any[]) => {
+            const vals = r.map((c: any) => String(c || '').trim());
+            return vals.some(v => v === '总计' || v === '合计' || v === 'Grand Total');
+          });
+          if (totalRow && colSub !== -1) {
+            packageTotal = parseFloat(String(totalRow[colSub] || '0').replace(/[^0-9.-]/g, '')) || 0;
+          }
+
+          const items: PkgQuoteItem[] = [];
+          dataRows.forEach((row: any[], idx: number) => {
+            const rawName = colName !== -1 ? String(row[colName] || '').trim() : '';
+            if (!rawName) return;
+            const nameLower = rawName.toLowerCase();
+            // Skip total/summary rows
+            if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
+            // Skip note rows
+            if (NOTE_PREFIXES.some(p => rawName.startsWith(p))) return;
+            // Skip numbered note continuations
+            if (/^[1-9一二三四五六七八九][、。．,.]/.test(rawName)) return;
+            // Skip header-like rows
+            if (HDR_ITEM.some(k => nameLower.includes(k)) && HDR_PRICE.some(k => nameLower.includes(k))) return;
+            // Skip brand/company rows
+            if (rawName.length > 0 && colArea !== -1 && !row[colArea] && colQty !== -1 && !row[colQty]) return;
+
+            const rawImg = colImg !== -1 ? String(row[colImg] || '') : '';
+            const imageFormula = rawImg.includes('DISPIMG') ? rawImg : undefined;
+            const qty = parseFloat(String(row[colQty] ?? '1').replace(/[^0-9.-]/g, '')) || 1;
+            const unitCost = parseFloat(String(row[colPrice] ?? '0').replace(/[^0-9.-]/g, '')) || 0;
+            const sub = parseFloat(String(row[colSub] ?? '0').replace(/[^0-9.-]/g, '')) || unitCost * qty;
+
+            items.push({
+              id: `pq-${si}-${idx}`,
+              seq:      colSeq  !== -1 ? String(row[colSeq] || '').trim()  : String(idx + 1),
+              area:     colArea !== -1 ? String(row[colArea] || '').trim() : '',
+              name:     rawName,
+              material: colMat  !== -1 ? String(row[colMat] || '').trim()  : '',
+              spec:     colSpec !== -1 ? String(row[colSpec] || '').trim()  : '',
+              qty,
+              unit:     colUnit !== -1 ? String(row[colUnit] || '').trim()  : '件',
+              unitCost,
+              subtotal: sub,
+              currency: pqMeta.currency || 'CNY',
+              imageFormula,
+            });
+          });
+
+          if (items.length > 0 || packageTotal > 0) {
+            packages.push({
+              id: `pkg-${si}`,
+              packageName: sheetName,
+              items,
+              totalCost: packageTotal || items.reduce((s, it) => s + it.subtotal, 0),
+              currency: pqMeta.currency || 'CNY',
+            });
+          }
+        });
+
+        if (packages.length === 0) throw new Error('No packages could be parsed from this Excel file.');
+        console.log(`[parsePackageExcel] Parsed ${packages.length} packages`);
+
+        setPqProject({
+          projectName: pqMeta.projectName || file.name.replace(/\.[^.]+$/, ''),
+          supplierName: pqMeta.supplierName,
+          sourceFileName: file.name,
+          currency: pqMeta.currency || 'CNY',
+          packages,
+        });
+        setPqParseStatus('done');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        console.error('[parsePackageExcel]', err);
+        setPqParseError(msg);
+        setPqParseStatus('error');
+      }
+    };
+    reader.onerror = () => { setPqParseError('Failed to read file.'); setPqParseStatus('error'); };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ── Package Quote: render ────────────────────────────────────────────────
+  const renderPackageQuote = () => (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest">
+        <button onClick={() => { setAppMode('landing'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
+          className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+          Workflow Home
+        </button>
+        <span className="text-[#0C1B3A]/20">›</span>
+        <span className="text-[#C9A84C]">Package Quote</span>
+        {pqProject && (
+          <>
+            <span className="text-[#0C1B3A]/20">›</span>
+            <span className="text-[#0C1B3A]/50">{pqProject.projectName}</span>
+          </>
+        )}
+      </div>
+
+      {/* Project Info form — only shown before parse */}
+      {pqParseStatus !== 'done' && (
+        <div className="max-w-2xl mx-auto space-y-6">
+          <div className="text-center space-y-2">
+            <h2 className="text-3xl font-serif italic text-[#0C1B3A]">Package Quote</h2>
+            <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-[#C9A84C]">Project · Package · Items</p>
+          </div>
+
+          {/* Meta fields */}
+          <div className="bg-[#0C1B3A]/3 rounded-[24px] p-6 space-y-4">
+            <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50">Project Info</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Project Name</label>
+                <input value={pqMeta.projectName} onChange={e => setPqMeta(p => ({ ...p, projectName: e.target.value }))}
+                  placeholder="e.g. Morocco Apartment"
+                  className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-medium text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Supplier Name</label>
+                <input value={pqMeta.supplierName} onChange={e => setPqMeta(p => ({ ...p, supplierName: e.target.value }))}
+                  placeholder="e.g. COOL HOME"
+                  className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-medium text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">Base Currency</label>
+                <select value={pqMeta.currency} onChange={e => setPqMeta(p => ({ ...p, currency: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-[#0C1B3A]/10 text-sm font-medium text-[#0C1B3A] bg-white outline-none focus:border-[#C9A84C] transition-colors">
+                  {['CNY','AED','USD','EUR','GBP'].map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Upload area */}
+          <div className="space-y-3">
+            <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50">Upload Multi-Sheet Excel</h3>
+            <label className="block cursor-pointer">
+              <input type="file" accept=".xlsx,.xls" className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  parsePackageExcel(file);
+                }} />
+              <div className="border-2 border-dashed border-[#C9A84C]/30 rounded-[24px] p-10 text-center hover:border-[#C9A84C] hover:bg-[#C9A84C]/3 transition-all">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-2xl bg-[#C9A84C]/10 flex items-center justify-center mx-auto">
+                    <Upload className="w-5 h-5 text-[#C9A84C]" />
+                  </div>
+                  <p className="text-sm font-bold text-[#0C1B3A]/60">Drag & drop or click to select</p>
+                  <p className="text-[11px] text-[#0C1B3A]/30">Excel with multiple sheets. Each sheet = one Package.</p>
+                  <p className="text-[10px] text-[#0C1B3A]/25">Sheets named 总表 / Summary / Total will be skipped automatically.</p>
+                </div>
+              </div>
+            </label>
+            {pqParseStatus === 'parsing' && (
+              <p className="text-center text-[12px] font-bold text-[#C9A84C] animate-pulse">Parsing Excel...</p>
+            )}
+            {pqParseStatus === 'error' && (
+              <p className="text-center text-[12px] font-bold text-red-500">❌ {pqParseError}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Package results */}
+      {pqParseStatus === 'done' && pqProject && (
+        <div className="space-y-6">
+          {/* Project header */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-black text-[#0C1B3A]">{pqProject.projectName}</h2>
+              <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">
+                {pqProject.supplierName && `${pqProject.supplierName} · `}
+                {pqProject.packages.length} packages · {pqProject.sourceFileName}
+              </p>
+            </div>
+            <button onClick={() => { setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
+              className="text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+              ↑ Upload New File
+            </button>
+          </div>
+
+          {/* Package cards */}
+          {pqProject.packages.map(pkg => {
+            const isOpen = pqExpanded.has(pkg.id);
+            const toggle = () => setPqExpanded(prev => {
+              const next = new Set(prev);
+              isOpen ? next.delete(pkg.id) : next.add(pkg.id);
+              return next;
+            });
+            // Group items by area
+            const areas = Array.from(new Set(pkg.items.map(it => it.area).filter(Boolean)));
+            const itemsByArea = areas.length > 0
+              ? areas.map(area => ({ area, items: pkg.items.filter(it => it.area === area) }))
+              : [{ area: '', items: pkg.items }];
+
+            return (
+              <div key={pkg.id} className="border border-[#0C1B3A]/8 rounded-[24px] overflow-hidden">
+                {/* Package header */}
+                <button onClick={toggle}
+                  className="w-full flex items-center justify-between px-6 py-4 bg-[#0C1B3A]/2 hover:bg-[#0C1B3A]/4 transition-colors text-left">
+                  <div className="flex items-center gap-4">
+                    <div className="w-2 h-2 rounded-full bg-[#C9A84C]" />
+                    <div>
+                      <span className="text-base font-black text-[#0C1B3A]">{pkg.packageName}</span>
+                      <span className="ml-3 text-[11px] text-[#0C1B3A]/40 font-bold">{pkg.items.length} items</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-base font-black text-[#0C1B3A]">
+                      {pkg.currency} {pkg.totalCost.toLocaleString()}
+                    </span>
+                    <span className="text-[#0C1B3A]/30 text-lg">{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {/* Items table */}
+                {isOpen && (
+                  <div className="px-6 pb-6 pt-2 space-y-4">
+                    {itemsByArea.map(({ area, items: areaItems }) => (
+                      <div key={area || 'default'}>
+                        {area && (
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C] mb-2 mt-3">{area}</p>
+                        )}
+                        <div className="overflow-x-auto rounded-[16px] border border-[#0C1B3A]/6">
+                          <table className="w-full text-[12px]">
+                            <thead>
+                              <tr className="bg-[#0C1B3A] text-white">
+                                {['#','Name','Material / Spec','Qty','Unit','Unit Cost','Subtotal'].map(h => (
+                                  <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider first:rounded-tl-[16px] last:rounded-tr-[16px]">{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {areaItems.map((it, i) => (
+                                <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono">{it.seq}</td>
+                                  <td className="px-3 py-2 font-bold text-[#0C1B3A]">{it.name}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[200px]">
+                                    <div>{it.material}</div>
+                                    {it.spec && <div className="text-[10px] text-[#0C1B3A]/30 mt-0.5">{it.spec}</div>}
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{it.unit}</td>
+                                  <td className="px-3 py-2 text-right font-mono text-[#0C1B3A]">{it.unitCost.toLocaleString()}</td>
+                                  <td className="px-3 py-2 text-right font-mono font-bold text-[#0C1B3A]">{it.subtotal.toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-[#0C1B3A]/5 border-t border-[#0C1B3A]/8">
+                                <td colSpan={6} className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#0C1B3A]/40 text-right">Area Total</td>
+                                <td className="px-3 py-2 text-right font-mono font-black text-[#0C1B3A]">
+                                  {areaItems.reduce((s, it) => s + it.subtotal, 0).toLocaleString()}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Package total */}
+                    <div className="flex justify-end">
+                      <div className="bg-[#0C1B3A] text-white rounded-[16px] px-6 py-3 flex items-center gap-4">
+                        <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Package Total</span>
+                        <span className="text-lg font-black">{pkg.currency} {pkg.totalCost.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Grand summary */}
+          <div className="flex justify-end pt-2">
+            <div className="border border-[#C9A84C]/30 rounded-[20px] px-8 py-4 space-y-1 text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/40">All Packages Combined</p>
+              <p className="text-2xl font-black text-[#0C1B3A]">
+                {pqProject.currency} {pqProject.packages.reduce((s, p) => s + p.totalCost, 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-[#0C1B3A]/30">{pqProject.packages.length} packages · {pqProject.packages.reduce((s, p) => s + p.items.length, 0)} items total</p>
+            </div>
+          </div>
+
+          {/* Phase 2 placeholder */}
+          <div className="text-center pt-4">
+            <div className="inline-flex items-center gap-2 bg-[#C9A84C]/8 border border-[#C9A84C]/20 rounded-2xl px-6 py-3">
+              <span className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/70">Phase 2 Coming</span>
+              <span className="text-[11px] text-[#0C1B3A]/40">Exchange Rate · Markup · GCI Package Quote Preview</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // ── Supplier Quote Upload flow ───────────────────────────────────────────
   const renderSupplierQuoteUpload = () => (
@@ -6435,26 +6828,28 @@ Return ONLY valid JSON:
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Save to Archive →</p>
                   </button>
 
-                  {/* 3: History Center */}
-                  <button onClick={() => { setView('history'); setHistoryTab('supplier'); }}
+                  {/* 3: Package Quote — NEW */}
+                  <button onClick={() => { setAppMode('package-quote'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
                     className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Records</span>
-                      <History className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">FF&E · Hotel · Apt</span>
+                      <Layers className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Quote History & Archive</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">报价历史与档案</p>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Package Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">套餐报价</p>
                     </div>
                     <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
-                      View supplier quote archive and GCI customer quote records. Continue editing or convert when needed. 查看供应商报价与 GCI 客户报价记录，可继续编辑或转换。
+                      Import multi-sheet Excel as Project → Package → Items. For CoolHome, FF&E, Apartment, Hotel. 多 Sheet 套餐导入，适用于公寓/酒店项目。
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Open →</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Import Packages →</p>
                   </button>
                 </div>
               </div>
             ) : appMode === 'supplier-quote' && view !== 'history' ? (
               renderSupplierQuoteUpload()
+            ) : appMode === 'package-quote' && view !== 'history' ? (
+              renderPackageQuote()
             ) : (
 
             /* ── Customer Quote flow + History (existing) ──────────── */
