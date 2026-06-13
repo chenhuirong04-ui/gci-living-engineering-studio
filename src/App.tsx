@@ -1248,7 +1248,7 @@ export default function App() {
                         <table className="w-full text-[12px]">
                           <thead>
                             <tr className="bg-[#0C1B3A] text-white">
-                              {['#','Area','Name','Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
+                              {['#','Photo','Area','Name','Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
                                 <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider">{h}</th>
                               ))}
                             </tr>
@@ -1259,6 +1259,12 @@ export default function App() {
                               return (
                                 <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
                                   <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono">{it.seq}</td>
+                                  <td className="px-3 py-2">
+                                    {it.imageDataUrl
+                                      ? <img src={it.imageDataUrl} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-[#0C1B3A]/10" />
+                                      : <div className="w-12 h-12 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[10px]">—</div>
+                                    }
+                                  </td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/50">{it.area}</td>
                                   <td className="px-3 py-2 font-bold text-[#0C1B3A]">{it.name}</td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[150px] truncate">{it.spec || it.material}</td>
