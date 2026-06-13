@@ -1260,11 +1260,28 @@ export default function App() {
       doc.setTextColor(...GOLD);
       doc.setFontSize(8.5);
       doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
-      y += 10;
+      y += 9;
+
+      // Column header row
+      doc.setFillColor(230, 234, 242);
+      doc.rect(14, y, PW - 28, 6, 'F');
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(80, 95, 120);
+      // same x positions as data rows
+      doc.text('#',    34, y + 4);
+      doc.text('AREA', 43, y + 4);
+      doc.text('ITEM NAME', 66, y + 4);
+      doc.text('MATERIAL', 118, y + 4);
+      doc.text('SIZE / SPEC', 178, y + 4);
+      doc.text('QTY', 222, y + 4, { align: 'right' });
+      doc.text('UNIT', 234, y + 4);
+      doc.text(`PRICE (${currency})`, 283, y + 4, { align: 'right' });
+      y += 7;
 
       // Items
       for (const it of pkg.items) {
-        const rowH = it.imageDataUrl ? 18 : 8;
+        const rowH = it.imageDataUrl ? 20 : (it.material || it.spec ? 13 : 8);
         if (y + rowH > 195) { doc.addPage(); addHeader(); y = 24; }
 
         const itemGCI = it.unitCost * rate * (1 + markup / 100) * it.qty;
@@ -1275,51 +1292,59 @@ export default function App() {
           doc.rect(14, y, PW - 28, rowH, 'F');
         }
 
+        // Column x positions (A4 landscape, margins 14, PW=297)
+        // [Photo 14-32] [Seq 34] [Area 43] [Name 66] [Material 118] [Spec 178] [Qty 222] [Unit 234] [Price right@283]
+        const imgX = 14, seqX = 34, areaX = 43, nameX = 66, matX = 118, specX = 178, qtyX = 222, unitX = 234, priceX = 283;
+
         // Photo thumbnail
-        const imgX = 16, txtX = 38;
         if (it.imageDataUrl) {
           try {
             doc.addImage(it.imageDataUrl, 'PNG', imgX, y + 1, 16, 16);
           } catch { /* skip bad image */ }
         }
 
-        doc.setTextColor(...NAVY);
+        // Row has 2 lines if material exists (regardless of image)
+        const matEn = pqTranslate(it.material);
+        const hasSecondLine = !!(matEn || it.spec);
+        const baseY = hasSecondLine ? y + 4.5 : y + 5.5;
+
         doc.setFontSize(7.5);
-        const baseY = it.imageDataUrl ? y + 5 : y + 5.5;
 
         // Seq
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(120, 130, 150);
-        doc.text(it.seq, txtX, baseY);
-
-        // Name
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...NAVY);
-        doc.text(pqTranslate(it.name), txtX + 14, baseY);
+        doc.setTextColor(150, 160, 175);
+        doc.text(it.seq, seqX, baseY);
 
         // Area
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 115, 140);
-        doc.text(pqTranslate(it.area || ''), txtX + 68, baseY);
+        const areaTxt = pqTranslate(it.area || '');
+        doc.text(areaTxt.slice(0, 16), areaX, baseY);
 
-        // Spec/material (line 2 if image row)
-        const specTxt = [pqTranslate(it.material), it.spec].filter(Boolean).join(' · ');
-        if (it.imageDataUrl && specTxt) {
-          doc.setFontSize(6.5);
-          doc.setTextColor(130, 145, 165);
-          doc.text(specTxt.slice(0, 80), txtX + 14, baseY + 6);
-        }
+        // Name
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...NAVY);
+        doc.text(pqTranslate(it.name).slice(0, 26), nameX, baseY);
+
+        // Material (line 1, truncated)
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 95, 120);
+        if (matEn) doc.text(matEn.slice(0, 28), matX, baseY);
+
+        // Spec / size (line 1)
+        doc.setTextColor(100, 115, 140);
+        if (it.spec) doc.text(it.spec.slice(0, 20), specX, baseY);
 
         // Qty + Unit
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
         doc.setTextColor(...NAVY);
-        doc.text(`${it.qty} ${pqTranslate(it.unit)}`, PW - 65, baseY, { align: 'right' });
+        doc.text(String(it.qty), qtyX, baseY, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.text(pqTranslate(it.unit), unitX, baseY);
 
         // Price
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...NAVY);
-        doc.text(`${currency} ${itemGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, baseY, { align: 'right' });
+        doc.text(`${currency} ${itemGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, priceX, baseY, { align: 'right' });
 
         // Light separator
         doc.setDrawColor(220, 225, 235);
@@ -1567,7 +1592,7 @@ export default function App() {
                         <table className="w-full text-[12px]">
                           <thead>
                             <tr className="bg-[#0C1B3A] text-white">
-                              {['#','Photo','Area','Name','Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
+                              {['#','Photo','Area','Name','Material','Size / Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
                                 <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider">{h}</th>
                               ))}
                             </tr>
@@ -1577,16 +1602,17 @@ export default function App() {
                               const itemConverted = it.unitCost * rate * (1 + markup / 100);
                               return (
                                 <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono">{it.seq}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono text-[11px]">{it.seq}</td>
                                   <td className="px-3 py-2">
                                     {it.imageDataUrl
                                       ? <img src={it.imageDataUrl} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-[#0C1B3A]/10" />
                                       : <div className="w-12 h-12 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[10px]">—</div>
                                     }
                                   </td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.area)}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/50 text-[11px]">{pqTranslate(it.area)}</td>
                                   <td className="px-3 py-2 font-bold text-[#0C1B3A]">{pqTranslate(it.name)}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[150px] truncate">{pqTranslate(it.spec || it.material)}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[160px] text-[11px]">{pqTranslate(it.material) || '—'}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[120px] text-[11px] font-mono">{it.spec || '—'}</td>
                                   <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.unit)}</td>
                                   <td className="px-3 py-2 text-right font-mono text-[#0C1B3A]/70">{it.unitCost.toLocaleString()}</td>
