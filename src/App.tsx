@@ -1133,14 +1133,14 @@ export default function App() {
     }
   };
 
-  // ── Package Quote: render ────────────────────────────────────────────────
   // ── Package Quote: CN → EN translation (only for Customer Quote + PDF) ───
-  // Original data is NEVER modified. This runs only at display/PDF time.
+  // Original data is NEVER modified. These functions run only at display/PDF time.
+
   const PQ_EN: Record<string, string> = {
     // Areas
     '客厅':'Living Room','起居室':'Living Room','餐厅':'Dining Room','卧室':'Bedroom',
     '主卧':'Master Bedroom','主卧室':'Master Bedroom','次卧':'Bedroom 2','次卧室':'Bedroom 2',
-    '儿童房':'Children\'s Room','书房':'Study','厨房':'Kitchen','卫生间':'Bathroom',
+    '儿童房':"Children's Room",'书房':'Study','厨房':'Kitchen','卫生间':'Bathroom',
     '主卫':'Master Bathroom','阳台':'Balcony','过道':'Hallway','门厅':'Foyer',
     '衣帽间':'Walk-in Closet','储藏室':'Storage','公区':'Common Area',
     // Item names
@@ -1161,16 +1161,79 @@ export default function App() {
     '组':'Set','副':'Pair','双':'Pair','米':'m','平方米':'m²','㎡':'m²',
   };
 
+  // Material keyword → English category (longest match wins)
+  const MAT_KW: [string, string][] = [
+    // Specific materials (check these first — more specific before generic)
+    ['不锈钢','Stainless Steel'],['碳素钢','Carbon Steel'],['镀金','Gold-plated'],
+    ['镀铬','Chrome-plated'],['镀铜','Copper-plated'],['铜','Brass'],['铁艺','Iron'],
+    ['铝合金','Aluminum Alloy'],['合金','Alloy'],['钢','Steel'],['金属','Metal'],
+    ['大理石','Marble'],['花岗岩','Granite'],['石英石','Quartz Stone'],['岩板','Sintered Stone'],
+    ['天然石','Natural Stone'],['人造石','Engineered Stone'],['石','Stone'],
+    ['玻璃','Glass'],['钢化玻璃','Tempered Glass'],
+    ['实木','Solid Wood'],['橡木','Oak'],['胡桃木','Walnut'],['松木','Pine'],
+    ['桦木','Birch'],['榉木','Beech'],['柚木','Teak'],['白蜡木','Ash Wood'],
+    ['多层板','Plywood'],['密度板','MDF'],['刨花板','Particle Board'],
+    ['环保板','Eco-Board'],['板材','Board'],['木','Wood'],
+    ['真皮','Genuine Leather'],['头层牛皮','Full-grain Leather'],['牛皮','Cowhide Leather'],
+    ['皮革','Leather'],['西皮','PU Leather'],['人造皮','Faux Leather'],['皮','Leather'],
+    ['高分子纺织布','Technical Fabric'],['纺织布','Woven Fabric'],['布艺','Fabric'],
+    ['绒布','Velvet'],['亚麻','Linen'],['棉麻','Cotton-Linen'],['棉','Cotton'],
+    ['面料','Upholstery Fabric'],['布','Fabric'],
+    ['海绵','Foam'],['记忆棉','Memory Foam'],['大忆棉','High-density Foam'],['乳胶','Latex'],
+    ['烤漆','Lacquer Finish'],['喷漆','Spray Paint'],['油漆','Paint'],
+    ['电镀','Electroplated'],['镀','Plated'],
+    ['大理石纹','Marble Pattern'],['仿石纹','Stone Pattern'],
+    ['环保','Eco-friendly'],
+  ];
+
+  const hasChinese = (s: string) => /[一-鿿]/.test(s);
+
+  // Translate simple/short terms using the PQ_EN dict (for area/name/unit)
   const pqTranslate = (text: string): string => {
     if (!text) return text;
-    // Exact match first
     if (PQ_EN[text]) return PQ_EN[text];
-    // Try to replace known substrings
     let out = text;
     for (const [cn, en] of Object.entries(PQ_EN)) {
       out = out.replace(cn, en);
     }
     return out;
+  };
+
+  // Translate material descriptions — handles complex compound Chinese strings
+  const materialToEn = (text: string): string => {
+    if (!text) return '';
+    if (!hasChinese(text)) return text; // already Latin — return as-is
+
+    // Step 1: apply PQ_EN substring replacements
+    let out = text;
+    for (const [cn, en] of Object.entries(PQ_EN)) {
+      out = out.replace(new RegExp(cn, 'g'), en);
+    }
+
+    // Step 2: apply material keyword replacements (longest first, already sorted)
+    for (const [kw, en] of MAT_KW) {
+      out = out.replace(new RegExp(kw, 'g'), en);
+    }
+
+    // Step 3: still has Chinese? Extract English parts + collect material categories
+    if (hasChinese(out)) {
+      // Pull out English-compatible segments (Latin, digits, symbols, spaces)
+      const enParts = out.match(/[A-Za-z0-9\-\/\+\*\. %&()]+/g) ?? [];
+      // Collect what material keywords were detected in ORIGINAL text
+      const detected: string[] = [];
+      for (const [kw, en] of MAT_KW) {
+        if (text.includes(kw) && !detected.includes(en)) detected.push(en);
+      }
+      const combined = [...new Set([...enParts.map(s => s.trim()).filter(s => s.length > 1), ...detected])];
+      out = combined.length > 0 ? combined.join(' + ') : 'Composite Material';
+    }
+
+    // Step 4: strip any remaining Chinese characters as final safety net
+    out = out.replace(/[一-鿿㐀-䶿]+/g, '').replace(/\s{2,}/g, ' ').trim();
+    // Clean up stray separators
+    out = out.replace(/^[+·\-\s]+|[+·\-\s]+$/g, '').replace(/[+·]{2,}/g, '+');
+
+    return out || 'Mixed Material';
   };
 
   // ── Package Quote Customer PDF ────────────────────────────────────────────
@@ -1304,7 +1367,7 @@ export default function App() {
         }
 
         // Row has 2 lines if material exists (regardless of image)
-        const matEn = pqTranslate(it.material);
+        const matEn = materialToEn(it.material);
         const hasSecondLine = !!(matEn || it.spec);
         const baseY = hasSecondLine ? y + 4.5 : y + 5.5;
 
@@ -1326,10 +1389,10 @@ export default function App() {
         doc.setTextColor(...NAVY);
         doc.text(pqTranslate(it.name).slice(0, 26), nameX, baseY);
 
-        // Material (line 1, truncated)
+        // Material (line 1, truncated) — always English via materialToEn
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(80, 95, 120);
-        if (matEn) doc.text(matEn.slice(0, 28), matX, baseY);
+        if (matEn) doc.text(matEn.slice(0, 32), matX, baseY);
 
         // Spec / size (line 1)
         doc.setTextColor(100, 115, 140);
@@ -1611,7 +1674,7 @@ export default function App() {
                                   </td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/50 text-[11px]">{pqTranslate(it.area)}</td>
                                   <td className="px-3 py-2 font-bold text-[#0C1B3A]">{pqTranslate(it.name)}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[160px] text-[11px]">{pqTranslate(it.material) || '—'}</td>
+                                  <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[160px] text-[11px]">{materialToEn(it.material) || '—'}</td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[120px] text-[11px] font-mono">{it.spec || '—'}</td>
                                   <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
                                   <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.unit)}</td>
