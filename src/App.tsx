@@ -1237,6 +1237,28 @@ export default function App() {
     return out || 'Mixed Material';
   };
 
+  // ── Spec cleaner: PDF-safe dimension string (no Chinese, no wide chars) ────
+  const cleanSpec = (raw: string): string => {
+    if (!raw) return '';
+    let s = raw;
+    // Normalise dimension separators
+    s = s.replace(/[×✕✖]/g, '*');       // ×  → *
+    s = s.replace(/[＊·•]/g, '*');       // ＊ → *
+    s = s.replace(/（/g, '(').replace(/）/g, ')'); // 全角括号
+    s = s.replace(/[，,、]/g, ' ');       // Chinese commas → space
+    // Extract all dimension-like segments: optional Ø, then digits/*x./- chains
+    const dimRe = /Ø?[\d]+(?:[*xX.\-\/][\d]+)+(?:\*[\d]+)?|Ø[\d]+/g;
+    const dims = s.match(dimRe) ?? [];
+    // Also keep plain numbers that look like a single dimension value (≥3 digits)
+    if (dims.length > 0) {
+      return dims.join(' / ');
+    }
+    // Fallback: strip all non-safe characters
+    s = s.replace(/[^0-9xX*./\-Ø ]/g, ' ');
+    s = s.replace(/\s{2,}/g, ' ').trim();
+    return s;
+  };
+
   // ── Package Quote Customer PDF ────────────────────────────────────────────
   const generatePkgCustomerPdf = (
     project: PkgQuoteProject,
@@ -1428,7 +1450,8 @@ export default function App() {
         if (matEn) doc.text(matEn.slice(0, 32), COL.mat, baseY);
 
         doc.setTextColor(100, 115, 140);
-        if (it.spec) doc.text(it.spec.slice(0, 20), COL.spec, baseY);
+        const specSafe = cleanSpec(it.spec);
+        if (specSafe) doc.text(specSafe.slice(0, 24), COL.spec, baseY);
 
         doc.setTextColor(...NAVY);
         doc.text(String(it.qty), COL.qty, baseY, { align: 'right' });
