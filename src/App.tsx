@@ -1045,24 +1045,45 @@ export default function App() {
           {/* Upload area */}
           <div className="space-y-3">
             <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-[#0C1B3A]/50">Upload Multi-Sheet Excel</h3>
-            <label className="block cursor-pointer">
-              <input type="file" accept=".xlsx,.xls" className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  parsePackageExcel(file);
-                }} />
-              <div className="border-2 border-dashed border-[#C9A84C]/30 rounded-[24px] p-10 text-center hover:border-[#C9A84C] hover:bg-[#C9A84C]/3 transition-all">
-                <div className="space-y-2">
-                  <div className="w-10 h-10 rounded-2xl bg-[#C9A84C]/10 flex items-center justify-center mx-auto">
-                    <Upload className="w-5 h-5 text-[#C9A84C]" />
+            {(() => {
+              const pqFileInputRef = { current: null as HTMLInputElement | null };
+              const handlePqDrop = (e: React.DragEvent<HTMLDivElement>) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const file = e.dataTransfer.files?.[0];
+                if (!file) return;
+                parsePackageExcel(file);
+              };
+              return (
+                <div
+                  onClick={() => pqFileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={handlePqDrop}
+                  className="border-2 border-dashed border-[#C9A84C]/30 rounded-[24px] p-10 text-center hover:border-[#C9A84C] hover:bg-[#C9A84C]/3 transition-all cursor-pointer select-none"
+                >
+                  <input
+                    ref={el => { pqFileInputRef.current = el; }}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      e.target.value = '';
+                      parsePackageExcel(file);
+                    }}
+                  />
+                  <div className="space-y-2 pointer-events-none">
+                    <div className="w-10 h-10 rounded-2xl bg-[#C9A84C]/10 flex items-center justify-center mx-auto">
+                      <Upload className="w-5 h-5 text-[#C9A84C]" />
+                    </div>
+                    <p className="text-sm font-bold text-[#0C1B3A]/60">Drag & drop or click to select</p>
+                    <p className="text-[11px] text-[#0C1B3A]/30">Excel with multiple sheets. Each sheet = one Package.</p>
+                    <p className="text-[10px] text-[#0C1B3A]/25">Sheets named 总表 / Summary / Total will be skipped automatically.</p>
                   </div>
-                  <p className="text-sm font-bold text-[#0C1B3A]/60">Drag & drop or click to select</p>
-                  <p className="text-[11px] text-[#0C1B3A]/30">Excel with multiple sheets. Each sheet = one Package.</p>
-                  <p className="text-[10px] text-[#0C1B3A]/25">Sheets named 总表 / Summary / Total will be skipped automatically.</p>
                 </div>
-              </div>
-            </label>
+              );
+            })()}
             {pqParseStatus === 'parsing' && (
               <p className="text-center text-[12px] font-bold text-[#C9A84C] animate-pulse">Parsing Excel...</p>
             )}
