@@ -327,6 +327,11 @@ export default function App() {
   const [pqExchangeRate, setPqExchangeRate] = useState<number>(0.505); // default CNY→AED
   const [pqMarkups, setPqMarkups] = useState<Record<string, number>>({}); // pkg.id → markup %
   const [pqPreviewExpanded, setPqPreviewExpanded] = useState<Set<string>>(new Set());
+  // EN fields per item — editable in Customer Preview, used by PDF
+  type PqItemEN = { nameEN: string; areaEN: string; materialEN: string; specEN: string; };
+  const [pqItemsEN, setPqItemsEN] = useState<Record<string, PqItemEN>>({});
+  const updateItemEN = (id: string, field: keyof PqItemEN, val: string) =>
+    setPqItemsEN(prev => ({ ...prev, [id]: { ...prev[id], [field]: val } }));
   const [pqSelectedPkgs, setPqSelectedPkgs] = useState<Set<string>>(new Set());
   const [pqCustomer, setPqCustomer] = useState('');
   const [pqProjectName, setPqProjectName] = useState('');
@@ -1433,24 +1438,25 @@ export default function App() {
           catch { /* skip */ }
         }
 
-        const matEn = materialToEn(it.material);
-        const baseY = (matEn || it.spec) ? y + 5 : y + 5.5;
+        const en = pqItemsEN[it.id] ?? { nameEN: pqTranslate(it.name), areaEN: pqTranslate(it.area || ''), materialEN: materialToEn(it.material), specEN: cleanSpec(it.spec) };
+        const matEn = en.materialEN || '';
+        const specSafe = en.specEN || '';
+        const baseY = (matEn || specSafe) ? y + 5 : y + 5.5;
 
         doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold'); doc.setTextColor(150, 160, 175);
         doc.text(it.seq, COL.seq, baseY);
 
         doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 115, 140);
-        doc.text(pqTranslate(it.area || '').slice(0, 16), COL.area, baseY);
+        doc.text(en.areaEN.slice(0, 16), COL.area, baseY);
 
         doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
-        doc.text(pqTranslate(it.name).slice(0, 26), COL.name, baseY);
+        doc.text(en.nameEN.slice(0, 26), COL.name, baseY);
 
         doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 95, 120);
         if (matEn) doc.text(matEn.slice(0, 32), COL.mat, baseY);
 
         doc.setTextColor(100, 115, 140);
-        const specSafe = cleanSpec(it.spec);
         if (specSafe) doc.text(specSafe.slice(0, 24), COL.spec, baseY);
 
         doc.setTextColor(...NAVY);
@@ -1682,44 +1688,86 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Item detail table */}
+                  {/* Item detail — EN editable fields + pricing */}
                   {isOpen && (
-                    <div className="px-6 pb-5 pt-3">
-                      <div className="overflow-x-auto rounded-[16px] border border-[#0C1B3A]/6">
-                        <table className="w-full text-[12px]">
-                          <thead>
-                            <tr className="bg-[#0C1B3A] text-white">
-                              {['#','Photo','Area','Name','Material','Size / Spec','Qty','Unit',`Cost (${baseCur})`,`GCI (${pqQuoteCurrency})`].map(h => (
-                                <th key={h} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-wider">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {pkg.items.map((it, i) => {
-                              const itemConverted = it.unitCost * rate * (1 + markup / 100);
-                              return (
-                                <tr key={it.id} className={i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/40 font-mono text-[11px]">{it.seq}</td>
-                                  <td className="px-3 py-2">
-                                    {it.imageDataUrl
-                                      ? <img src={it.imageDataUrl} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-[#0C1B3A]/10" />
-                                      : <div className="w-12 h-12 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[10px]">—</div>
-                                    }
-                                  </td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/50 text-[11px]">{pqTranslate(it.area)}</td>
-                                  <td className="px-3 py-2 font-bold text-[#0C1B3A]">{pqTranslate(it.name)}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/55 max-w-[160px] text-[11px]">{materialToEn(it.material) || '—'}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/40 max-w-[120px] text-[11px] font-mono">{it.spec || '—'}</td>
-                                  <td className="px-3 py-2 text-right text-[#0C1B3A]">{it.qty}</td>
-                                  <td className="px-3 py-2 text-[#0C1B3A]/50">{pqTranslate(it.unit)}</td>
-                                  <td className="px-3 py-2 text-right font-mono text-[#0C1B3A]/70">{it.unitCost.toLocaleString()}</td>
-                                  <td className="px-3 py-2 text-right font-mono font-bold text-[#0C1B3A]">{itemConverted.toLocaleString(undefined,{maximumFractionDigits:0})}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                    <div className="px-6 pb-5 pt-3 space-y-2">
+                      {/* Column labels */}
+                      <div className="grid grid-cols-[48px_1fr_1fr_1fr_80px_60px_90px] gap-2 px-3 py-1">
+                        {['Photo','Item Name (EN)','Material (EN)','Size / Spec (EN)','Qty / Unit',`GCI ${pqQuoteCurrency}`,''].map(h => (
+                          <p key={h} className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/30">{h}</p>
+                        ))}
                       </div>
+                      {pkg.items.map((it, i) => {
+                        const en = pqItemsEN[it.id] ?? { nameEN: '', areaEN: '', materialEN: '', specEN: '' };
+                        const itemGCI = it.unitCost * rate * (1 + markup / 100) * it.qty;
+                        return (
+                          <div key={it.id} className={`rounded-[14px] border border-[#0C1B3A]/6 ${i % 2 === 0 ? 'bg-white' : 'bg-[#0C1B3A]/2'}`}>
+                            <div className="grid grid-cols-[48px_1fr_1fr_1fr_80px_60px_90px] gap-2 items-start p-3">
+                              {/* Photo */}
+                              <div className="pt-1">
+                                {it.imageDataUrl
+                                  ? <img src={it.imageDataUrl} alt={it.name} className="w-10 h-10 object-cover rounded-lg border border-[#0C1B3A]/10" />
+                                  : <div className="w-10 h-10 rounded-lg bg-[#0C1B3A]/5 flex items-center justify-center text-[#0C1B3A]/20 text-[9px]">—</div>
+                                }
+                              </div>
+                              {/* Item Name */}
+                              <div className="space-y-1">
+                                <p className="text-[9px] text-[#0C1B3A]/25 font-mono leading-tight">{it.seq} · {it.name}</p>
+                                <p className="text-[9px] text-[#0C1B3A]/20 leading-tight">{it.area}</p>
+                                <input
+                                  value={en.nameEN}
+                                  onChange={e => updateItemEN(it.id, 'nameEN', e.target.value)}
+                                  placeholder="Item name in English"
+                                  className="w-full text-[11px] font-bold text-[#0C1B3A] bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5 transition-colors placeholder:text-[#0C1B3A]/15"
+                                />
+                                <input
+                                  value={en.areaEN}
+                                  onChange={e => updateItemEN(it.id, 'areaEN', e.target.value)}
+                                  placeholder="Area"
+                                  className="w-full text-[10px] text-[#0C1B3A]/50 bg-transparent border-b border-[#0C1B3A]/6 focus:border-[#C9A84C] outline-none py-0.5 transition-colors placeholder:text-[#0C1B3A]/15"
+                                />
+                              </div>
+                              {/* Material */}
+                              <div className="space-y-1">
+                                <p className="text-[9px] text-[#0C1B3A]/20 leading-tight line-clamp-2">{it.material}</p>
+                                <textarea
+                                  value={en.materialEN}
+                                  onChange={e => updateItemEN(it.id, 'materialEN', e.target.value)}
+                                  placeholder="Material in English"
+                                  rows={2}
+                                  className="w-full text-[11px] text-[#0C1B3A]/80 bg-transparent border border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none rounded-lg p-1.5 resize-none transition-colors placeholder:text-[#0C1B3A]/15"
+                                />
+                              </div>
+                              {/* Spec */}
+                              <div className="space-y-1">
+                                <p className="text-[9px] text-[#0C1B3A]/20 leading-tight font-mono">{it.spec}</p>
+                                <input
+                                  value={en.specEN}
+                                  onChange={e => updateItemEN(it.id, 'specEN', e.target.value)}
+                                  placeholder="Size / spec"
+                                  className="w-full text-[11px] font-mono text-[#0C1B3A]/70 bg-transparent border-b border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none py-0.5 transition-colors placeholder:text-[#0C1B3A]/15"
+                                />
+                              </div>
+                              {/* Qty / Unit */}
+                              <div className="text-center pt-4">
+                                <p className="text-[13px] font-bold text-[#0C1B3A]">{it.qty}</p>
+                                <p className="text-[10px] text-[#0C1B3A]/40">{pqTranslate(it.unit)}</p>
+                              </div>
+                              {/* GCI Price */}
+                              <div className="text-right pt-4">
+                                <p className="text-[12px] font-mono font-black text-[#0C1B3A]">
+                                  {itemGCI.toLocaleString(undefined,{maximumFractionDigits:0})}
+                                </p>
+                              </div>
+                              {/* Internal cost (small) */}
+                              <div className="text-right pt-4">
+                                <p className="text-[9px] font-mono text-[#0C1B3A]/25">{baseCur} {it.unitCost.toLocaleString()}</p>
+                                <p className="text-[9px] text-[#0C1B3A]/20">× {it.qty}</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -2016,6 +2064,19 @@ export default function App() {
                 // Default: all packages selected
                 setPqSelectedPkgs(new Set(pqProject?.packages.map(p => p.id) ?? []));
                 setPqProjectName(pqProject?.projectName ?? '');
+                // Auto-populate EN fields as initial suggestions (user can override)
+                const initEN: Record<string, PqItemEN> = {};
+                pqProject?.packages.forEach(pkg => {
+                  pkg.items.forEach(it => {
+                    initEN[it.id] = {
+                      nameEN: pqTranslate(it.name),
+                      areaEN: pqTranslate(it.area),
+                      materialEN: materialToEn(it.material),
+                      specEN: cleanSpec(it.spec),
+                    };
+                  });
+                });
+                setPqItemsEN(initEN);
                 setPqPhase('preview');
               }}
               className="px-10 py-4 rounded-[20px] bg-[#0C1B3A] text-white text-[13px] font-black uppercase tracking-widest hover:bg-[#C9A84C] transition-colors shadow-lg"
