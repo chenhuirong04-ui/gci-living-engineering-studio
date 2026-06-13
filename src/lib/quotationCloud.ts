@@ -205,6 +205,15 @@ export async function listQuotations(limit = 60): Promise<QuotationRecord[]> {
 }
 
 /**
+ * Delete a quotation and all its items.
+ */
+export async function deleteQuotation(id: string): Promise<boolean> {
+  await sbFetch(`/rest/v1/quotation_items?quotation_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await sbFetch(`/rest/v1/quotation_records?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return res !== null;
+}
+
+/**
  * Mark a quotation as SENT_TO_TRADE and optionally write the PI id.
  */
 export async function markSentToTrade(id: string, tradePiId?: string): Promise<void> {
