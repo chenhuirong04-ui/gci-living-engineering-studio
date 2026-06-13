@@ -128,6 +128,13 @@ export async function loadSupplierQuote(
   return { quote: quotes[0], items };
 }
 
+/** Delete a supplier quote and all its items. */
+export async function deleteSupplierQuote(id: string): Promise<boolean> {
+  await sbFetch(`/rest/v1/supplier_quote_items?supplier_quote_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const res = await sbFetch(`/rest/v1/supplier_quotes?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return res !== null;
+}
+
 /** Mark a supplier quote as Converted and store the GCI quotation id. */
 export async function markSupplierQuoteConverted(
   supplierQuoteId: string,
