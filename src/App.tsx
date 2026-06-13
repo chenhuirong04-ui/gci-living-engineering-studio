@@ -1140,7 +1140,7 @@ export default function App() {
     // Areas
     '客厅':'Living Room','起居室':'Living Room','餐厅':'Dining Room','卧室':'Bedroom',
     '主卧':'Master Bedroom','主卧室':'Master Bedroom','次卧':'Bedroom 2','次卧室':'Bedroom 2',
-    '儿童房':"Children's Room",'书房':'Study','厨房':'Kitchen','卫生间':'Bathroom',
+    '儿童房':"Children's Room",'书房':'Study','休闲椅':'Lounge Chair','躺椅':'Lounge Chair','单椅':'Accent Chair','厨房':'Kitchen','卫生间':'Bathroom',
     '主卫':'Master Bathroom','阳台':'Balcony','过道':'Hallway','门厅':'Foyer',
     '衣帽间':'Walk-in Closet','储藏室':'Storage','公区':'Common Area',
     // Item names
@@ -1245,10 +1245,15 @@ export default function App() {
     meta: { customer: string; quoteNo: string; quoteDate: string; validUntil: string; paymentTerms: string; deliveryTerms: string }
   ) => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const PW = 297; // page width landscape
+    const PW = 297;
+    const PH = 210;
+    const MARGIN = 14;
+    const CONTENT_BOTTOM = PH - 12; // footer occupies bottom 10mm
     const NAVY = [12, 27, 58] as [number, number, number];
     const GOLD = [201, 168, 76] as [number, number, number];
     const LGRAY = [245, 246, 248] as [number, number, number];
+    // Column x positions
+    const COL = { img: MARGIN, seq: 34, area: 43, name: 66, mat: 118, spec: 178, qty: 222, unit: 234, price: 283 };
 
     const totalGCI = project.packages.reduce((s, p) => {
       const m = markups[p.id] ?? 0;
@@ -1257,227 +1262,226 @@ export default function App() {
 
     let y = 0;
 
-    const addHeader = () => {
-      // Navy top bar
+    // ── Reusable helpers ──────────────────────────────────────────────────────
+    const drawPageHeader = () => {
       doc.setFillColor(...NAVY);
       doc.rect(0, 0, PW, 20, 'F');
-      // Gold accent line
       doc.setFillColor(...GOLD);
       doc.rect(0, 20, PW, 1.2, 'F');
-      // Logo / company
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('GCI', 14, 13);
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+      doc.text('GCI', MARGIN, 13);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
       doc.setTextColor(...GOLD);
       doc.text('GLOBAL CARE INFO', 26, 13);
-      // Title
       doc.setTextColor(255, 255, 255);
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.text('PACKAGE QUOTATION', PW - 14, 13, { align: 'right' });
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text('PACKAGE QUOTATION', PW - MARGIN, 13, { align: 'right' });
     };
 
-    const addQuoteMeta = () => {
-      // Meta info box
-      doc.setFillColor(...LGRAY);
-      doc.roundedRect(14, 24, PW - 28, 28, 2, 2, 'F');
-      doc.setTextColor(...NAVY);
-      doc.setFontSize(7.5);
-      doc.setFont('helvetica', 'bold');
-      // Left col
-      const lx = 18, rx = PW / 2 + 4;
-      const ly = 29;
-      doc.text('PROJECT', lx, ly); doc.setFont('helvetica', 'normal'); doc.text(project.projectName, lx + 22, ly);
-      doc.setFont('helvetica', 'bold'); doc.text('CUSTOMER', lx, ly + 6); doc.setFont('helvetica', 'normal'); doc.text(meta.customer || '—', lx + 22, ly + 6);
-      doc.setFont('helvetica', 'bold'); doc.text('CURRENCY', lx, ly + 12); doc.setFont('helvetica', 'normal'); doc.text(currency, lx + 22, ly + 12);
-      doc.setFont('helvetica', 'bold'); doc.text('PACKAGES', lx, ly + 18); doc.setFont('helvetica', 'normal'); doc.text(String(project.packages.length), lx + 22, ly + 18);
-      // Right col
-      doc.setFont('helvetica', 'bold'); doc.text('QUOTE NO', rx, ly); doc.setFont('helvetica', 'normal'); doc.text(meta.quoteNo, rx + 22, ly);
-      doc.setFont('helvetica', 'bold'); doc.text('DATE', rx, ly + 6); doc.setFont('helvetica', 'normal'); doc.text(meta.quoteDate, rx + 22, ly + 6);
-      doc.setFont('helvetica', 'bold'); doc.text('VALID UNTIL', rx, ly + 12); doc.setFont('helvetica', 'normal'); doc.text(meta.validUntil, rx + 22, ly + 12);
-      doc.setFont('helvetica', 'bold'); doc.text('TOTAL', rx, ly + 18);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(...GOLD);
-      doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, rx + 22, ly + 18);
-      y = 56;
+    const drawPageFooter = (pageNum: number, totalPages: number) => {
+      doc.setFillColor(...NAVY);
+      doc.rect(0, PH - 10, PW, 10, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal');
+      doc.text(`GCI Package Quotation  ·  ${meta.quoteNo}`, MARGIN, PH - 4.5);
+      doc.text(`Page ${pageNum} / ${totalPages}`, PW - MARGIN, PH - 4.5, { align: 'right' });
     };
 
-    addHeader();
-    addQuoteMeta();
+    const drawColHeaders = () => {
+      doc.setFillColor(228, 232, 242);
+      doc.rect(MARGIN, y, PW - MARGIN * 2, 6, 'F');
+      doc.setFontSize(6); doc.setFont('helvetica', 'bold');
+      doc.setTextColor(75, 90, 115);
+      doc.text('#', COL.seq, y + 4);
+      doc.text('AREA', COL.area, y + 4);
+      doc.text('ITEM NAME', COL.name, y + 4);
+      doc.text('MATERIAL', COL.mat, y + 4);
+      doc.text('SIZE / SPEC', COL.spec, y + 4);
+      doc.text('QTY', COL.qty, y + 4, { align: 'right' });
+      doc.text('UNIT', COL.unit, y + 4);
+      doc.text(`PRICE (${currency})`, COL.price, y + 4, { align: 'right' });
+      y += 7;
+    };
 
-    // ── Package sections ─────────────────────────────────────────────────────
+    const drawPkgTitleBand = (pkgName: string, gciTotal: number) => {
+      doc.setFillColor(...NAVY);
+      doc.rect(MARGIN, y, PW - MARGIN * 2, 9, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+      doc.text(pqTranslate(pkgName).toUpperCase(), MARGIN + 4, y + 6);
+      doc.setTextColor(...GOLD);
+      doc.setFontSize(9);
+      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - MARGIN, y + 6, { align: 'right' });
+      y += 10;
+    };
+
+    // ── Page 1: Cover / Quote Meta ────────────────────────────────────────────
+    drawPageHeader();
+    doc.setFillColor(...LGRAY);
+    doc.roundedRect(MARGIN, 24, PW - MARGIN * 2, 30, 2, 2, 'F');
+    doc.setTextColor(...NAVY);
+    doc.setFontSize(7.5);
+    const lx = MARGIN + 4, rx = PW / 2 + 4, ly = 30;
+    doc.setFont('helvetica', 'bold'); doc.text('PROJECT', lx, ly);
+    doc.setFont('helvetica', 'normal'); doc.text(project.projectName.slice(0, 50), lx + 24, ly);
+    doc.setFont('helvetica', 'bold'); doc.text('CUSTOMER', lx, ly + 7);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.customer || '—', lx + 24, ly + 7);
+    doc.setFont('helvetica', 'bold'); doc.text('CURRENCY', lx, ly + 14);
+    doc.setFont('helvetica', 'normal'); doc.text(currency, lx + 24, ly + 14);
+    doc.setFont('helvetica', 'bold'); doc.text('PACKAGES', lx, ly + 21);
+    doc.setFont('helvetica', 'normal'); doc.text(String(project.packages.length), lx + 24, ly + 21);
+    doc.setFont('helvetica', 'bold'); doc.text('QUOTE NO', rx, ly);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.quoteNo, rx + 26, ly);
+    doc.setFont('helvetica', 'bold'); doc.text('DATE', rx, ly + 7);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.quoteDate, rx + 26, ly + 7);
+    doc.setFont('helvetica', 'bold'); doc.text('VALID UNTIL', rx, ly + 14);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.validUntil, rx + 26, ly + 14);
+    doc.setFont('helvetica', 'bold'); doc.text('TOTAL', rx, ly + 21);
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...GOLD);
+    doc.setFontSize(9);
+    doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, rx + 26, ly + 21);
+
+    // Package summary list on page 1
+    y = 60;
+    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+    doc.text('PACKAGE SUMMARY', lx, y); y += 5;
+    doc.setFillColor(228, 232, 242);
+    doc.rect(MARGIN, y, PW - MARGIN * 2, 5, 'F');
+    doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.setTextColor(75, 90, 115);
+    doc.text('PACKAGE', lx, y + 3.5);
+    doc.text('ITEMS', 180, y + 3.5, { align: 'right' });
+    doc.text(`PRICE (${currency})`, PW - MARGIN, y + 3.5, { align: 'right' });
+    y += 6;
+    project.packages.forEach((pkg, idx) => {
+      const m = markups[pkg.id] ?? 0;
+      const gci = pkg.totalCost * rate * (1 + m / 100);
+      if (idx % 2 === 0) { doc.setFillColor(250, 251, 253); doc.rect(MARGIN, y, PW - MARGIN * 2, 6, 'F'); }
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...NAVY);
+      doc.text(pqTranslate(pkg.packageName), lx, y + 4.2);
+      doc.text(String(pkg.items.length), 180, y + 4.2, { align: 'right' });
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+      doc.text(`${currency} ${gci.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - MARGIN, y + 4.2, { align: 'right' });
+      y += 6;
+    });
+    // Grand total on summary list
+    y += 2;
+    doc.setFillColor(...NAVY);
+    doc.roundedRect(MARGIN, y, PW - MARGIN * 2, 8, 1, 1, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text('GRAND TOTAL', lx, y + 5.5);
+    doc.setTextColor(...GOLD); doc.setFontSize(10);
+    doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - MARGIN, y + 5.5, { align: 'right' });
+
+    // ── Package sections — each starts on a new page ──────────────────────────
     for (const pkg of project.packages) {
       const markup = markups[pkg.id] ?? 0;
       const gciTotal = pkg.totalCost * rate * (1 + markup / 100);
 
-      // Package title band
-      if (y > 175) { doc.addPage(); addHeader(); y = 24; }
-      doc.setFillColor(...NAVY);
-      doc.rect(14, y, PW - 28, 8, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
-      doc.text(pqTranslate(pkg.packageName).toUpperCase(), 18, y + 5.5);
-      doc.setTextColor(...GOLD);
-      doc.setFontSize(8.5);
-      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
-      y += 9;
+      // Always start new page for each package
+      doc.addPage();
+      drawPageHeader();
+      y = 24;
+      drawPkgTitleBand(pkg.packageName, gciTotal);
+      drawColHeaders();
 
-      // Column header row
-      doc.setFillColor(230, 234, 242);
-      doc.rect(14, y, PW - 28, 6, 'F');
-      doc.setFontSize(6);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(80, 95, 120);
-      // same x positions as data rows
-      doc.text('#',    34, y + 4);
-      doc.text('AREA', 43, y + 4);
-      doc.text('ITEM NAME', 66, y + 4);
-      doc.text('MATERIAL', 118, y + 4);
-      doc.text('SIZE / SPEC', 178, y + 4);
-      doc.text('QTY', 222, y + 4, { align: 'right' });
-      doc.text('UNIT', 234, y + 4);
-      doc.text(`PRICE (${currency})`, 283, y + 4, { align: 'right' });
-      y += 7;
-
-      // Items
       for (const it of pkg.items) {
         const rowH = it.imageDataUrl ? 20 : (it.material || it.spec ? 13 : 8);
-        if (y + rowH > 195) { doc.addPage(); addHeader(); y = 24; }
+
+        // Mid-package page break: repeat title + headers
+        if (y + rowH > CONTENT_BOTTOM) {
+          doc.addPage();
+          drawPageHeader();
+          y = 24;
+          drawPkgTitleBand(pkg.packageName, gciTotal);
+          drawColHeaders();
+        }
 
         const itemGCI = it.unitCost * rate * (1 + markup / 100) * it.qty;
-        // Alternate row background
         const rowIdx = pkg.items.indexOf(it);
         if (rowIdx % 2 === 0) {
           doc.setFillColor(250, 251, 253);
-          doc.rect(14, y, PW - 28, rowH, 'F');
+          doc.rect(MARGIN, y, PW - MARGIN * 2, rowH, 'F');
         }
 
-        // Column x positions (A4 landscape, margins 14, PW=297)
-        // [Photo 14-32] [Seq 34] [Area 43] [Name 66] [Material 118] [Spec 178] [Qty 222] [Unit 234] [Price right@283]
-        const imgX = 14, seqX = 34, areaX = 43, nameX = 66, matX = 118, specX = 178, qtyX = 222, unitX = 234, priceX = 283;
-
-        // Photo thumbnail
+        // Photo
         if (it.imageDataUrl) {
-          try {
-            doc.addImage(it.imageDataUrl, 'PNG', imgX, y + 1, 16, 16);
-          } catch { /* skip bad image */ }
+          try { doc.addImage(it.imageDataUrl, 'PNG', COL.img, y + 1.5, 16, 16); }
+          catch { /* skip */ }
         }
 
-        // Row has 2 lines if material exists (regardless of image)
         const matEn = materialToEn(it.material);
-        const hasSecondLine = !!(matEn || it.spec);
-        const baseY = hasSecondLine ? y + 4.5 : y + 5.5;
+        const baseY = (matEn || it.spec) ? y + 5 : y + 5.5;
 
         doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(150, 160, 175);
+        doc.text(it.seq, COL.seq, baseY);
 
-        // Seq
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(150, 160, 175);
-        doc.text(it.seq, seqX, baseY);
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 115, 140);
+        doc.text(pqTranslate(it.area || '').slice(0, 16), COL.area, baseY);
 
-        // Area
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+        doc.text(pqTranslate(it.name).slice(0, 26), COL.name, baseY);
+
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 95, 120);
+        if (matEn) doc.text(matEn.slice(0, 32), COL.mat, baseY);
+
         doc.setTextColor(100, 115, 140);
-        const areaTxt = pqTranslate(it.area || '');
-        doc.text(areaTxt.slice(0, 16), areaX, baseY);
+        if (it.spec) doc.text(it.spec.slice(0, 20), COL.spec, baseY);
 
-        // Name
-        doc.setFont('helvetica', 'bold');
         doc.setTextColor(...NAVY);
-        doc.text(pqTranslate(it.name).slice(0, 26), nameX, baseY);
-
-        // Material (line 1, truncated) — always English via materialToEn
+        doc.text(String(it.qty), COL.qty, baseY, { align: 'right' });
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(80, 95, 120);
-        if (matEn) doc.text(matEn.slice(0, 32), matX, baseY);
+        doc.text(pqTranslate(it.unit), COL.unit, baseY);
 
-        // Spec / size (line 1)
-        doc.setTextColor(100, 115, 140);
-        if (it.spec) doc.text(it.spec.slice(0, 20), specX, baseY);
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+        doc.text(`${currency} ${itemGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, COL.price, baseY, { align: 'right' });
 
-        // Qty + Unit
-        doc.setTextColor(...NAVY);
-        doc.text(String(it.qty), qtyX, baseY, { align: 'right' });
-        doc.setFont('helvetica', 'normal');
-        doc.text(pqTranslate(it.unit), unitX, baseY);
-
-        // Price
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...NAVY);
-        doc.text(`${currency} ${itemGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, priceX, baseY, { align: 'right' });
-
-        // Light separator
-        doc.setDrawColor(220, 225, 235);
-        doc.setLineWidth(0.2);
-        doc.line(14, y + rowH, PW - 14, y + rowH);
-
+        doc.setDrawColor(220, 225, 235); doc.setLineWidth(0.2);
+        doc.line(MARGIN, y + rowH, PW - MARGIN, y + rowH);
         y += rowH;
       }
 
-      // Package subtotal row
-      if (y + 8 > 195) { doc.addPage(); addHeader(); y = 24; }
-      doc.setFillColor(230, 235, 245);
-      doc.rect(14, y, PW - 28, 7, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
+      // Package total — always at bottom of section, with gap
+      if (y + 10 > CONTENT_BOTTOM) { doc.addPage(); drawPageHeader(); y = 24; }
+      y += 4;
+      doc.setFillColor(225, 230, 245);
+      doc.rect(MARGIN, y, PW - MARGIN * 2, 8, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
       doc.setTextColor(...NAVY);
-      doc.text(`${pqTranslate(pkg.packageName)} — Package Total`, 18, y + 4.8);
+      doc.text(`${pqTranslate(pkg.packageName)} — Package Total`, MARGIN + 4, y + 5.5);
       doc.setTextColor(...GOLD);
-      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 4.8, { align: 'right' });
-      y += 10;
+      doc.text(`${currency} ${gciTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - MARGIN, y + 5.5, { align: 'right' });
+      y += 12;
     }
 
-    // ── Summary ───────────────────────────────────────────────────────────────
-    if (y + 30 > 195) { doc.addPage(); addHeader(); y = 24; }
-    y += 4;
-    doc.setFillColor(...NAVY);
-    doc.roundedRect(14, y, PW - 28, 8, 1, 1, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text('GRAND TOTAL', 18, y + 5.5);
-    doc.setTextColor(...GOLD);
-    doc.setFontSize(10);
-    doc.text(`${currency} ${totalGCI.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, PW - 16, y + 5.5, { align: 'right' });
-    y += 14;
-
-    // ── Terms ─────────────────────────────────────────────────────────────────
-    if (y + 20 > 195) { doc.addPage(); addHeader(); y = 24; }
+    // ── Final page: Terms ─────────────────────────────────────────────────────
+    doc.addPage();
+    drawPageHeader();
+    y = 30;
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+    doc.text('TERMS & CONDITIONS', MARGIN + 4, y); y += 8;
     doc.setFillColor(...LGRAY);
-    doc.roundedRect(14, y, PW - 28, 16, 1, 1, 'F');
-    doc.setTextColor(...NAVY);
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    doc.text('PAYMENT TERMS', 18, y + 5);
-    doc.setFont('helvetica', 'normal'); doc.text(meta.paymentTerms, 48, y + 5);
-    doc.setFont('helvetica', 'bold'); doc.text('DELIVERY TERMS', 18, y + 11);
-    doc.setFont('helvetica', 'normal'); doc.text(meta.deliveryTerms, 48, y + 11);
-    // Right: GCI contact
+    doc.roundedRect(MARGIN, y, PW - MARGIN * 2, 22, 2, 2, 'F');
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...NAVY);
+    doc.text('PAYMENT TERMS', MARGIN + 4, y + 7);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.paymentTerms, MARGIN + 40, y + 7);
+    doc.setFont('helvetica', 'bold'); doc.text('DELIVERY TERMS', MARGIN + 4, y + 15);
+    doc.setFont('helvetica', 'normal'); doc.text(meta.deliveryTerms, MARGIN + 40, y + 15);
     doc.setFont('helvetica', 'bold'); doc.setTextColor(...GOLD);
-    doc.text('Global Care Info', PW - 16, y + 5, { align: 'right' });
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 115, 140);
-    doc.setFontSize(6.5);
-    doc.text('chris@globalcareinfo.com', PW - 16, y + 10, { align: 'right' });
-    doc.text('www.globalcareinfo.com', PW - 16, y + 14.5, { align: 'right' });
+    doc.text('Global Care Info', PW - MARGIN, y + 7, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(100, 115, 140);
+    doc.text('chris@globalcareinfo.com', PW - MARGIN, y + 13, { align: 'right' });
+    doc.text('www.globalcareinfo.com', PW - MARGIN, y + 18, { align: 'right' });
 
     // ── Footer on every page ──────────────────────────────────────────────────
     const totalPages = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
-      doc.setFillColor(...NAVY);
-      doc.rect(0, 202, PW, 8, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(6);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`GCI Package Quotation · ${meta.quoteNo} · Confidential`, 14, 207.5);
-      doc.text(`Page ${i} / ${totalPages}`, PW - 14, 207.5, { align: 'right' });
+      drawPageFooter(i, totalPages);
     }
 
-    const fname = `GCI-Package-Quote-${meta.quoteNo}.pdf`;
-    doc.save(fname);
+    doc.save(`GCI-Package-Quote-${meta.quoteNo}.pdf`);
   };
 
   const renderPackageQuote = () => {
