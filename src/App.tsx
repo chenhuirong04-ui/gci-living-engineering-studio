@@ -1058,9 +1058,38 @@ export default function App() {
         const colPrice = findCol(['单价','price']);
         const colSub   = findCol(['小计','sub total','subtotal','合计']);
 
+        let colImgMut = colImg;
+        let colNameMut = colName;
+
         let packageTotal = 0;
         const dataRowsWithOrig = rowsWithOrig.slice(headerIdx + 1);
         const dataRows = dataRowsWithOrig.map(({ r }) => r);
+
+        // Auto-detect image column from cell values if header didn't match
+        if (colImgMut === -1 && dataRows.length > 0) {
+          const firstRow = dataRows[0] as any[];
+          for (let ci = 0; ci < firstRow.length; ci++) {
+            const sample = dataRows.slice(0, 5).map((r: any[]) => String(r[ci] || ''));
+            if (sample.some(v => v.includes('DISPIMG'))) { colImgMut = ci; break; }
+          }
+        }
+        // If colName points to the image column (header confusion), re-detect
+        if (colNameMut !== -1 && colNameMut === colImgMut) {
+          colNameMut = headers.findIndex((h: string, i: number) =>
+            i !== colImgMut && ['名称','name','品名','产品','描述'].some(k => h.includes(k))
+          );
+        }
+        // Also check: even if indices differ, does the detected name column contain DISPIMG?
+        if (colNameMut !== -1) {
+          const sample = dataRows.slice(0, 5).map((r: any[]) => String(r[colNameMut] || ''));
+          if (sample.filter(v => v.includes('DISPIMG')).length >= 2) {
+            if (colImgMut === -1) colImgMut = colNameMut;
+            colNameMut = headers.findIndex((h: string, i: number) =>
+              i !== colImgMut && ['名称','name','品名','产品','描述'].some(k => h.includes(k))
+            );
+          }
+        }
+
         const totalRow = dataRows.find((r: any[]) => {
           const vals = r.map((c: any) => String(c || '').trim());
           return vals.some(v => v === '总计' || v === '合计' || v === 'Grand Total');
@@ -1071,7 +1100,7 @@ export default function App() {
 
         const items: PkgQuoteItem[] = [];
         dataRowsWithOrig.forEach(({ r: row, origIdx }, idx: number) => {
-          const rawName = colName !== -1 ? String(row[colName] || '').trim() : '';
+          const rawName = colNameMut !== -1 ? String(row[colNameMut] || '').trim() : '';
           if (!rawName) return;
           const nameLower = rawName.toLowerCase();
           if (SKIP_ROW_WORDS.some(k => nameLower === k || nameLower.startsWith(k + ' '))) return;
@@ -1080,7 +1109,7 @@ export default function App() {
           if (HDR_ITEM.some(k => nameLower.includes(k)) && HDR_PRICE.some(k => nameLower.includes(k))) return;
           if (rawName.length > 0 && colArea !== -1 && !row[colArea] && colQty !== -1 && !row[colQty]) return;
 
-          const rawImg = colImg !== -1 ? String(row[colImg] || '') : '';
+          const rawImg = colImgMut !== -1 ? String(row[colImgMut] || '') : '';
           const imgIdMatch = rawImg.match(/ID_([A-F0-9]+)/i);
           const dispimgId = imgIdMatch ? `ID_${imgIdMatch[1].toUpperCase()}` : undefined;
           const imageFormula = rawImg.includes('DISPIMG') ? rawImg : undefined;
