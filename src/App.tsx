@@ -222,6 +222,7 @@ interface DraftItem {
   remarks?: string;
   englishDescription?: string; // editable EN translation, shown in customer quote
   marginPercent?: number;      // per-item margin override (defaults to global margin)
+  imageDataUrl?: string;       // photo extracted from Excel (DISPIMG/floating) or supplied PDF/image
 }
 
 // ── Package Quote (Project → Package → Items) ────────────────────────────────
@@ -891,6 +892,119 @@ export default function App() {
   };
 
   // ── Package Quote: parse multi-sheet Excel ──────────────────────────────
+  // ── Shared XLSX image extraction (DISPIMG cell images + floating/anchored drawings) ──
+  // Used by both Package Quote (Module 3) and Supplier Quote (Module 2) — single source of truth.
+  // Returns: { dispimgId → dataUrl, sheetName → { 0-based row index → dataUrl } }
+  const extractXlsxImages = async (arrayBuffer: ArrayBuffer): Promise<{
+    imgDataUrls: Record<string, string>;
+    floatingBySheet: Record<string, Record<number, string>>;
+  }> => {
+    const imgDataUrls: Record<string, string> = {};
+    const floatingBySheet: Record<string, Record<number, string>> = {};
+    try {
+      const zip = await JSZip.loadAsync(arrayBuffer);
+
+      // Parse cellimages.xml.rels → rId → media filename
+      const relsFile = zip.files['xl/_rels/cellimages.xml.rels'];
+      const cellImgFile = zip.files['xl/cellimages.xml'];
+
+      if (relsFile && cellImgFile) {
+        const relsText = await relsFile.async('text');
+        const cellText = await cellImgFile.async('text');
+
+        const ridToMedia: Record<string, string> = {};
+        for (const m of relsText.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g)) {
+          if (!m[2].toLowerCase().includes('null')) ridToMedia[m[1]] = m[2];
+        }
+
+        const idToRid: Record<string, string> = {};
+        for (const m of cellText.matchAll(/name="(ID_[A-F0-9]+)"[\s\S]*?r:embed="([^"]+)"/gi)) {
+          idToRid[m[1]] = m[2];
+        }
+
+        for (const [dispId, rid] of Object.entries(idToRid)) {
+          const mediaPath = ridToMedia[rid];
+          if (!mediaPath) continue;
+          const fullPath = `xl/${mediaPath}`;
+          const mediaFile = zip.files[fullPath];
+          if (!mediaFile) continue;
+          const b64 = await mediaFile.async('base64');
+          const ext = fullPath.split('.').pop()?.toLowerCase() || 'png';
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+          imgDataUrls[dispId] = `data:${mime};base64,${b64}`;
+        }
+        console.log(`[extractXlsxImages] Extracted ${Object.keys(imgDataUrls).length} DISPIMG images`);
+      } else {
+        console.log('[extractXlsxImages] No cellimages.xml found — skipping DISPIMG extraction');
+      }
+
+      // ── Floating/anchored drawing images ─────────────────────────────
+      try {
+        const wbXml = zip.files['xl/workbook.xml'] ? await zip.files['xl/workbook.xml'].async('text') : '';
+        const wbRels = zip.files['xl/_rels/workbook.xml.rels'] ? await zip.files['xl/_rels/workbook.xml.rels'].async('text') : '';
+        const sheetNameToRid: Record<string, string> = {};
+        for (const m of wbXml.matchAll(/sheet name="([^"]+)"[^r]*r:id="([^"]+)"/g)) {
+          sheetNameToRid[m[1]] = m[2];
+        }
+        const ridToSheetPath: Record<string, string> = {};
+        for (const m of wbRels.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g)) {
+          ridToSheetPath[m[1]] = m[2];
+        }
+        for (const [sheetName, sheetRid] of Object.entries(sheetNameToRid)) {
+          const sheetPath = ridToSheetPath[sheetRid];
+          if (!sheetPath) continue;
+          const sheetFileName = sheetPath.split('/').pop()!;
+          const sheetRelsPath = `xl/worksheets/_rels/${sheetFileName}.rels`;
+          const sheetRelsFile = zip.files[sheetRelsPath];
+          if (!sheetRelsFile) continue;
+          const sheetRelsXml = await sheetRelsFile.async('text');
+          const drawingMatch = sheetRelsXml.match(/Id="([^"]+)"[^>]+Type="[^"]*drawing[^"]*"[^>]+Target="([^"]+)"/);
+          if (!drawingMatch) continue;
+          const drawingRelPath = drawingMatch[2];
+          const drawingPath = `xl/drawings/${drawingRelPath.replace('../drawings/', '')}`;
+          const drawingFile = zip.files[drawingPath];
+          if (!drawingFile) continue;
+          const drawingXml = await drawingFile.async('text');
+          const drawingFileName = drawingPath.split('/').pop()!;
+          const drawingRelsPath = `xl/drawings/_rels/${drawingFileName}.rels`;
+          const drawingRelsFile = zip.files[drawingRelsPath];
+          if (!drawingRelsFile) continue;
+          const drawingRelsXml = await drawingRelsFile.async('text');
+          const dRidToMedia: Record<string, string> = {};
+          for (const m of drawingRelsXml.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g)) {
+            if (!m[2].toLowerCase().includes('null')) dRidToMedia[m[1]] = m[2];
+          }
+          const rowMap: Record<number, string> = {};
+          for (const anchor of drawingXml.matchAll(/<xdr:twoCellAnchor[\s\S]*?<\/xdr:twoCellAnchor>/g)) {
+            const a = anchor[0];
+            const fromRowStr = a.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/)?.[1];
+            const embed = a.match(/r:embed="([^"]+)"/)?.[1];
+            if (fromRowStr == null || !embed) continue;
+            const fromRow = parseInt(fromRowStr);
+            const mediaRel = dRidToMedia[embed];
+            if (!mediaRel) continue;
+            const mediaPath = `xl/media/${mediaRel.replace('../media/', '')}`;
+            const mediaFile = zip.files[mediaPath];
+            if (!mediaFile) continue;
+            const b64 = await mediaFile.async('base64');
+            const ext = mediaPath.split('.').pop()?.toLowerCase() || 'png';
+            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+            rowMap[fromRow] = `data:${mime};base64,${b64}`;
+          }
+          if (Object.keys(rowMap).length > 0) {
+            floatingBySheet[sheetName] = rowMap;
+            console.log(`[extractXlsxImages] Floating images for "${sheetName}":`, Object.keys(rowMap));
+          }
+        }
+      } catch (fErr) {
+        console.warn('[extractXlsxImages] Floating image extraction failed (non-fatal):', fErr);
+      }
+    } catch (imgErr) {
+      console.warn('[extractXlsxImages] Image extraction failed (non-fatal):', imgErr);
+    }
+    return { imgDataUrls, floatingBySheet };
+  };
+
   const parsePackageExcel = async (file: File) => {
     setPqParseStatus('parsing');
     setPqParseError('');
@@ -900,130 +1014,8 @@ export default function App() {
       const workbook = XLSX.read(data, { type: 'array' });
       console.log('[parsePackageExcel] SheetNames:', workbook.SheetNames);
 
-      // ── Step 1: extract DISPIMG ID → image dataUrl via JSZip ─────────────
-      // Map: dispimgId → base64 data URL
-      const imgDataUrls: Record<string, string> = {};
-      // Map: sheetName → { 0-based Excel row index → dataUrl } (floating/anchored images)
-      const floatingBySheet: Record<string, Record<number, string>> = {};
-      try {
-        const zip = await JSZip.loadAsync(arrayBuffer);
-
-        // Parse cellimages.xml.rels → rId → media filename
-        const relsFile = zip.files['xl/_rels/cellimages.xml.rels'];
-        const cellImgFile = zip.files['xl/cellimages.xml'];
-
-        if (relsFile && cellImgFile) {
-          const relsText = await relsFile.async('text');
-          const cellText = await cellImgFile.async('text');
-
-          // rId → media path
-          const ridToMedia: Record<string, string> = {};
-          const relMatches = relsText.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g);
-          for (const m of relMatches) {
-            if (!m[2].toLowerCase().includes('null')) {
-              ridToMedia[m[1]] = m[2]; // e.g. rId26 → media/image29.png
-            }
-          }
-
-          // name (DISPIMG ID) → rId (from r:embed)
-          const idToRid: Record<string, string> = {};
-          const cellMatches = cellText.matchAll(/name="(ID_[A-F0-9]+)"[\s\S]*?r:embed="([^"]+)"/gi);
-          for (const m of cellMatches) {
-            idToRid[m[1]] = m[2]; // e.g. ID_xxx → rId26
-          }
-
-          // Build final: DISPIMG ID → base64 data URL
-          for (const [dispId, rid] of Object.entries(idToRid)) {
-            const mediaPath = ridToMedia[rid];
-            if (!mediaPath) continue;
-            const fullPath = `xl/${mediaPath}`; // xl/media/image29.png
-            const mediaFile = zip.files[fullPath];
-            if (!mediaFile) continue;
-            const b64 = await mediaFile.async('base64');
-            const ext = fullPath.split('.').pop()?.toLowerCase() || 'png';
-            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
-            imgDataUrls[dispId] = `data:${mime};base64,${b64}`;
-          }
-          console.log(`[parsePackageExcel] Extracted ${Object.keys(imgDataUrls).length} DISPIMG images`);
-        } else {
-          console.log('[parsePackageExcel] No cellimages.xml found — skipping DISPIMG extraction');
-        }
-
-        // ── Also extract floating/anchored drawing images ─────────────────
-        // Map: sheetName → { 0basedRowIndex → dataUrl }
-        // Chain: workbook.xml → workbook.xml.rels → sheetN._rels → drawingN.xml → drawingN._rels → media
-        try {
-          const wbXml = zip.files['xl/workbook.xml'] ? await zip.files['xl/workbook.xml'].async('text') : '';
-          const wbRels = zip.files['xl/_rels/workbook.xml.rels'] ? await zip.files['xl/_rels/workbook.xml.rels'].async('text') : '';
-          // sheetName → rId
-          const sheetNameToRid: Record<string, string> = {};
-          for (const m of wbXml.matchAll(/sheet name="([^"]+)"[^r]*r:id="([^"]+)"/g)) {
-            sheetNameToRid[m[1]] = m[2];
-          }
-          // rId → worksheets/sheetN.xml path
-          const ridToSheetPath: Record<string, string> = {};
-          for (const m of wbRels.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g)) {
-            ridToSheetPath[m[1]] = m[2]; // e.g. worksheets/sheet2.xml
-          }
-          for (const [sheetName, sheetRid] of Object.entries(sheetNameToRid)) {
-            const sheetPath = ridToSheetPath[sheetRid];
-            if (!sheetPath) continue;
-            // sheet rels: xl/worksheets/_rels/sheetN.xml.rels
-            const sheetFileName = sheetPath.split('/').pop()!;
-            const sheetRelsPath = `xl/worksheets/_rels/${sheetFileName}.rels`;
-            const sheetRelsFile = zip.files[sheetRelsPath];
-            if (!sheetRelsFile) continue;
-            const sheetRelsXml = await sheetRelsFile.async('text');
-            // find drawing relationship
-            const drawingMatch = sheetRelsXml.match(/Id="([^"]+)"[^>]+Type="[^"]*drawing[^"]*"[^>]+Target="([^"]+)"/);
-            if (!drawingMatch) continue;
-            const drawingRelPath = drawingMatch[2]; // e.g. ../drawings/drawing1.xml
-            const drawingPath = `xl/drawings/${drawingRelPath.replace('../drawings/', '')}`;
-            const drawingFile = zip.files[drawingPath];
-            if (!drawingFile) continue;
-            const drawingXml = await drawingFile.async('text');
-            // drawing rels
-            const drawingFileName = drawingPath.split('/').pop()!;
-            const drawingRelsPath = `xl/drawings/_rels/${drawingFileName}.rels`;
-            const drawingRelsFile = zip.files[drawingRelsPath];
-            if (!drawingRelsFile) continue;
-            const drawingRelsXml = await drawingRelsFile.async('text');
-            const dRidToMedia: Record<string, string> = {};
-            for (const m of drawingRelsXml.matchAll(/Id="([^"]+)"[^>]+Target="([^"]+)"/g)) {
-              if (!m[2].toLowerCase().includes('null')) {
-                dRidToMedia[m[1]] = m[2]; // ../media/imageN.png
-              }
-            }
-            // parse anchors: fromRow (0-based) → embed rId
-            const rowMap: Record<number, string> = {};
-            for (const anchor of drawingXml.matchAll(/<xdr:twoCellAnchor[\s\S]*?<\/xdr:twoCellAnchor>/g)) {
-              const a = anchor[0];
-              const fromRowStr = a.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/)?.[1];
-              const embed = a.match(/r:embed="([^"]+)"/)?.[1];
-              if (fromRowStr == null || !embed) continue;
-              const fromRow = parseInt(fromRowStr);
-              const mediaRel = dRidToMedia[embed];
-              if (!mediaRel) continue;
-              const mediaPath = `xl/media/${mediaRel.replace('../media/', '')}`;
-              const mediaFile = zip.files[mediaPath];
-              if (!mediaFile) continue;
-              const b64 = await mediaFile.async('base64');
-              const ext = mediaPath.split('.').pop()?.toLowerCase() || 'png';
-              const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
-              rowMap[fromRow] = `data:${mime};base64,${b64}`;
-            }
-            if (Object.keys(rowMap).length > 0) {
-              floatingBySheet[sheetName] = rowMap;
-              console.log(`[parsePackageExcel] Floating images for "${sheetName}":`, Object.keys(rowMap));
-            }
-          }
-        } catch (fErr) {
-          console.warn('[parsePackageExcel] Floating image extraction failed (non-fatal):', fErr);
-        }
-      } catch (imgErr) {
-        // Image extraction failure must never break item parsing
-        console.warn('[parsePackageExcel] Image extraction failed (non-fatal):', imgErr);
-      }
+      // ── Step 1: extract images via shared helper ─────────────────────────
+      const { imgDataUrls, floatingBySheet } = await extractXlsxImages(arrayBuffer);
 
       // ── Step 2: parse sheets → packages ─────────────────────────────────
       const SKIP_WORDS = ['summary','total','totals','总表','汇总','合计','总计','overview','汇总表'];
@@ -2278,7 +2270,7 @@ export default function App() {
                   id="sq-file-upload"
                   type="file"
                   style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
-                  accept=".xlsx,.csv,.pdf,image/*"
+                  accept=".xlsx,.csv,.pdf,.docx,image/*"
                   onChange={handleFileUpload}
                 />
                 {sqSelectedFile ? (
@@ -2291,7 +2283,7 @@ export default function App() {
                   <>
                     <Upload className="w-8 h-8 text-[#0C1B3A]/20" />
                     <p className="text-[12px] font-bold text-[#0C1B3A]/40 mt-3">Drag & drop or click to select</p>
-                    <p className="text-[11px] text-[#0C1B3A]/25 mt-1">Excel, CSV, PDF, PNG, JPG</p>
+                    <p className="text-[11px] text-[#0C1B3A]/25 mt-1">Excel, CSV, PDF, DOCX, PNG, JPG</p>
                   </>
                 )}
               </div>
@@ -2316,8 +2308,10 @@ export default function App() {
                     setSqParseError('');
                     const isPDF = sqSelectedFile.type === 'application/pdf' || sqSelectedFile.name.toLowerCase().endsWith('.pdf');
                     const isImage = sqSelectedFile.type.startsWith('image/');
+                    const isDocx = sqSelectedFile.name.toLowerCase().endsWith('.docx');
                     if (isPDF) parsePDF(sqSelectedFile);
                     else if (isImage) analyzeImage(sqSelectedFile);
+                    else if (isDocx) parseDocx(sqSelectedFile);
                     else parseExcel(sqSelectedFile);
                   }}
                   disabled={isProcessingAI}
@@ -2433,10 +2427,14 @@ export default function App() {
                 <div key={item.id} className={`px-6 py-4 group transition-opacity space-y-3 ${included ? '' : 'opacity-40'}`}>
                   {/* Row 1: core fields */}
                   <div className="grid grid-cols-12 gap-3 items-center">
-                    <div className="col-span-1 flex justify-center">
+                    <div className="col-span-1 flex flex-col items-center gap-1.5">
                       <input type="checkbox" checked={included}
                         onChange={e => update({ includeInGCI: e.target.checked })}
                         className="w-4 h-4 accent-[#C9A84C] cursor-pointer" />
+                      {item.imageDataUrl
+                        ? <img src={item.imageDataUrl} alt="" className="w-9 h-9 object-cover rounded-md border border-[#0C1B3A]/10" />
+                        : <div className="w-9 h-9 rounded-md bg-[#0C1B3A]/4 flex items-center justify-center text-[#0C1B3A]/15 text-[8px]">—</div>
+                      }
                     </div>
                     <div className="col-span-3">
                       <input value={item.originalName}
@@ -3884,6 +3882,7 @@ export default function App() {
     const isExcelOrCsv = file.name.endsWith('.xlsx') || file.name.endsWith('.csv');
     const isImage = file.type.startsWith('image/');
     const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isDocx = file.name.toLowerCase().endsWith('.docx');
 
     // In Supplier Quote mode: store file first, let user click "Parse" explicitly.
     // Excel/CSV never needs AI so auto-parse those regardless.
@@ -3901,8 +3900,10 @@ export default function App() {
       parsePDF(file);
     } else if (isImage) {
       analyzeImage(file);
+    } else if (isDocx) {
+      parseDocx(file);
     } else {
-      alert("Unsupported file format. Please upload Excel, CSV, PDF, PNG, or JPG.");
+      alert("Unsupported file format. Please upload Excel, CSV, PDF, DOCX, PNG, or JPG.");
     }
   };
 
@@ -4074,9 +4075,15 @@ Leave a field as empty string if not present. Never fabricate values.`;
 
     reader.onload = async (e) => {
       try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        const data = new Uint8Array(arrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         console.log('[REAL_EXCEL_PARSER] SheetNames:', workbook.SheetNames);
+
+        // Embedded image extraction (DISPIMG cell images + floating/anchored drawings) —
+        // reuses Module 3 (Package Quote)'s extractXlsxImages helper; never blocks parsing on failure.
+        const { imgDataUrls: sqImgDataUrls, floatingBySheet: sqFloatingBySheet } =
+          await extractXlsxImages(arrayBuffer).catch(() => ({ imgDataUrls: {}, floatingBySheet: {} }));
         
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
           throw new Error('No sheets found in Excel file.');
@@ -4213,6 +4220,13 @@ Leave a field as empty string if not present. Never fabricate values.`;
             }
           }
 
+          // Detect which column (if any) holds embedded cell images (=DISPIMG formulas)
+          let colImg = -1;
+          for (let ci = 0; ci < (dataRows[0] || []).length; ci++) {
+            const colSample = dataRows.slice(0, 5).map((r: any) => String(r[ci] || ''));
+            if (colSample.some(v => v.includes('DISPIMG'))) { colImg = ci; break; }
+          }
+
           // Extra detail columns — best-effort, missing column just means empty field
           const findColLocal = (kList: string[]) => headers.findIndex((h: string) => kList.some(k => h === k || (h.length > 1 && h.includes(k))));
           const colModel   = findColLocal(['model','sku','型号','货号']);
@@ -4227,8 +4241,10 @@ Leave a field as empty string if not present. Never fabricate values.`;
           const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
           const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','合价','grand'];
           const NOTE_PREFIXES = ['注：','注:','备注','note:','note：','*','（注','(注'];
+          const headerRowOffset = bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1;
           const rows: any[] = [];
           dataRows.forEach((row: any, idx: number) => {
+            const origRowIdx = headerRowOffset + idx; // 0-based Excel row, matches floating-image anchors
             const name = String(row[autoMappings.item] || '').trim();
             const nameLower = name.toLowerCase();
             if (!name || name === '0') return;
@@ -4256,11 +4272,18 @@ Leave a field as empty string if not present. Never fabricate values.`;
             const enName = pqTranslate(name);
             const enMaterial = rawMaterial ? materialToEn(rawMaterial) : '';
             const englishDescription = [enName, enMaterial].filter(Boolean).join(' — ');
+            // Embedded image for this row: DISPIMG cell image takes priority, else floating/anchored image at this row
+            const rawImgCell = colImg !== -1 ? String(row[colImg] || '') : '';
+            const imgIdMatch = rawImgCell.match(/ID_([A-F0-9]+)/i);
+            const dispimgId = imgIdMatch ? `ID_${imgIdMatch[1].toUpperCase()}` : undefined;
+            const imageDataUrl = (dispimgId ? sqImgDataUrls[dispimgId] : undefined)
+              ?? sqFloatingBySheet[firstSheetName]?.[origRowIdx];
             rows.push({
               id: `sq-xl-${Date.now()}-${idx}`,
               originalName: name,
               englishDescription,
               originalSpec: rawSpec,
+              imageDataUrl,
               model:    colModel    !== -1 ? String(row[colModel] || '').trim()    : '',
               material: rawMaterial,
               color:    colColor    !== -1 ? String(row[colColor] || '').trim()    : '',
@@ -4454,6 +4477,110 @@ Leave a field as empty string if not present. Never fabricate values.`;
     } catch (err) {
       console.error('Vision Analysis Error:', err);
       alert('AI Vision Analysis failed.');
+    } finally {
+      setIsProcessingAI(false);
+    }
+  };
+
+  // ── DOCX (Word) supplier quotes — text + any embedded photos, read together ───
+  const parseDocx = async (file: File) => {
+    setIsProcessingAI(true);
+    setSqParseStatus('parsing');
+    setSqParseError('');
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      const docFile = zip.files['word/document.xml'];
+      if (!docFile) throw new Error('Not a valid .docx file (word/document.xml not found).');
+      const xml = await docFile.async('text');
+
+      // Flatten Word XML into readable text: table cells → " | ", paragraphs/rows → newline
+      const text = xml
+        .replace(/<\/w:tc>/g, ' | ')
+        .replace(/<\/w:tr>/g, '\n')
+        .replace(/<\/w:p>/g, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        .split('\n').map(l => l.replace(/\s*\|\s*\|+/g, ' | ').trim()).filter(Boolean).join('\n');
+
+      if (!text.trim()) throw new Error('No readable text found in this .docx file.');
+
+      // Embedded photos (word/media/*) — can't be anchored to a specific row reliably in Word,
+      // so they're sent alongside the text and the AI is asked to cross-reference by context.
+      const mediaPaths = Object.keys(zip.files).filter(f => f.startsWith('word/media/'));
+      const imageParts: any[] = [];
+      for (const path of mediaPaths.slice(0, 10)) { // cap to keep payload reasonable
+        try {
+          const b64 = await zip.files[path].async('base64');
+          const ext = path.split('.').pop()?.toLowerCase() || 'png';
+          if (!['png','jpg','jpeg'].includes(ext)) continue;
+          const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+          imageParts.push({ inlineData: { mimeType: mime, data: b64 } });
+        } catch { /* skip unreadable media */ }
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY || '';
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `Analyze this supplier quote extracted from a Word document (Chinese or English). The text below was flattened from a Word table/paragraphs — " | " separates cells in the same row.
+${imageParts.length > 0 ? `${imageParts.length} photo(s) embedded in the document are attached after this text — use them for extra detail (model numbers, appearance, labels) where relevant, cross-referencing by context.` : ''}
+
+Separate into PRODUCT ITEMS and TERMS (payment/lead time/validity/remarks/supplier info) exactly like a supplier quote PDF would be read.
+For each item, also write a professional English description (not a literal translation) while keeping the supplier's original text untouched.
+
+Document text:
+"""
+${text.slice(0, 12000)}
+"""
+
+Return ONLY valid JSON:
+{"items":[{
+  "originalName":"name as written by supplier (keep Chinese if Chinese)",
+  "englishDescription":"professional English description",
+  "originalSpec":"size/spec/dimensions",
+  "model":"model or SKU if any","material":"material","color":"color if mentioned",
+  "quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0,
+  "originalCurrency":"currency code if visible e.g. RMB/USD/AED",
+  "moq":"minimum order quantity if mentioned","packaging":"packaging method if mentioned",
+  "deliveryTime":"lead/delivery time if mentioned","paymentTerms":"payment terms if mentioned",
+  "remarks":"any other notes for this item"
+}],"terms":"..."}
+Leave a field as empty string if not present. Never fabricate values.`;
+
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: [{ role: 'user', parts: [{ text: prompt }, ...imageParts] }],
+        }),
+        25000, 'DOCX AI Analysis'
+      );
+
+      const rawText = response.text || '';
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const extractedTerms: string = parsed.terms || '';
+      if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+
+      const rows = extractedItems.map((it: any, idx: number) => ({
+        ...it,
+        id: `draft-docx-${Date.now()}-${idx}`,
+        status: 'Need Review' as const,
+      }));
+
+      if (rows.length === 0) {
+        alert(`DOCX: AI returned 0 items.\nExtracted text preview:\n${text.slice(0, 300)}`);
+        return;
+      }
+
+      await processWithAI(rows);
+      setSqParseStatus('done');
+    } catch (err: any) {
+      const msg = err?.message || err?.toString() || 'unknown error';
+      console.error('[DOCX] Error:', err);
+      setSqParseError(msg);
+      setSqParseStatus('error');
+      alert(`❌ DOCX parse failed:\n${msg}`);
     } finally {
       setIsProcessingAI(false);
     }
