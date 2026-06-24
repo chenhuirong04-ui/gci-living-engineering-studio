@@ -223,6 +223,10 @@ interface DraftItem {
   englishDescription?: string; // editable EN translation, shown in customer quote
   marginPercent?: number;      // per-item margin override (defaults to global margin)
   imageDataUrl?: string;       // photo extracted from Excel (DISPIMG/floating) or supplied PDF/image
+  // ── Module 2 V3: read-everything + image OCR provenance ──────────────
+  sourceType?: 'excel' | 'excel-image-ocr' | 'pdf' | 'image' | 'docx' | 'text' | 'manual';
+  dataConfidence?: 'high' | 'low'; // AI-OCR confidence in the extracted fields (separate from category confidence)
+  sizeDimension?: string;          // explicit Size/Dimension, distinct from free-text Specification
 }
 
 // ── Package Quote (Project → Package → Items) ────────────────────────────────
@@ -313,6 +317,10 @@ export default function App() {
   const [sqCustomerCurrency, setSqCustomerCurrency] = useState<'AED' | 'USD'>('AED');
   const [sqExchangeRate, setSqExchangeRate] = useState<number>(0.505); // Supplier currency → Customer currency
   const [sqGlobalMargin, setSqGlobalMargin] = useState<number>(30);    // default margin %, per-item overridable
+  // Module 2 V3: field-level visibility for the customer-facing GCI Quote (internal vs customer view separation)
+  const [sqIncludeFields, setSqIncludeFields] = useState({
+    deliveryTime: false, packaging: false, remarks: false, moq: false, paymentTerms: false,
+  });
   const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
   // Cloud save state
   const [cloudId, setCloudId] = useState<string | null>(null);
@@ -2352,7 +2360,7 @@ export default function App() {
       {draftItems.length === 0 && (sqParseStatus === 'error' || sqParseStatus === 'idle') && (
         <div className="flex justify-center pt-2">
           <button
-            onClick={() => setDraftItems([{ id: `sq-manual-${Date.now()}`, originalName: 'Item 1', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER }])}
+            onClick={() => setDraftItems([{ id: `sq-manual-${Date.now()}`, originalName: 'Item 1', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER, sourceType: 'manual' }])}
             className="flex items-center gap-2 px-6 py-3 rounded-[16px] border-2 border-dashed border-[#0C1B3A]/15 text-[#0C1B3A]/50 text-[12px] font-black uppercase tracking-widest hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all"
           >
             <Plus className="w-4 h-4" /> Add Items Manually (no AI needed)
@@ -2437,6 +2445,14 @@ export default function App() {
                       }
                     </div>
                     <div className="col-span-3">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        {item.sourceType === 'excel-image-ocr' && (
+                          <span className="text-[7px] font-black uppercase tracking-wider text-[#C9A84C] bg-[#C9A84C]/10 px-1.5 py-0.5 rounded">Image OCR</span>
+                        )}
+                        {item.dataConfidence === 'low' && (
+                          <span className="text-[7px] font-black uppercase tracking-wider text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Low confidence — verify</span>
+                        )}
+                      </div>
                       <input value={item.originalName}
                         onChange={e => update({ originalName: e.target.value })}
                         placeholder="Original Description"
@@ -2484,9 +2500,9 @@ export default function App() {
                   </div>
 
                   {/* Row 3: extra supplier detail fields */}
-                  <div className="grid grid-cols-6 gap-2 pl-1">
+                  <div className="grid grid-cols-7 gap-2 pl-1">
                     {([
-                      ['model','Model'],['material','Material'],['color','Color'],
+                      ['model','Model'],['material','Material'],['color','Color'],['sizeDimension','Size / Dimension'],
                       ['moq','MOQ'],['packaging','Packaging'],['deliveryTime','Delivery'],
                     ] as [keyof DraftItem, string][]).map(([key, label]) => (
                       <div key={key}>
@@ -2522,7 +2538,7 @@ export default function App() {
               })}
             </div>
             <div className="px-6 py-4 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
-              <button onClick={() => setDraftItems(prev => [...prev, { id: `sq-new-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER }])}
+              <button onClick={() => setDraftItems(prev => [...prev, { id: `sq-new-${Date.now()}`, originalName: 'New Item', originalSpec: '', quantity: 1, unit: 'pcs', targetUnitPrice: 0, targetTotal: 0, confidence: 1, status: 'Confirmed' as const, suggestedCategory: FurnitureCategory.OTHER, sourceType: 'manual' }])}
                 className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-2">
                 <Plus className="w-4 h-4" /> Add Item
               </button>
@@ -2574,6 +2590,47 @@ export default function App() {
                   <p className="text-[11px] text-green-600">What would you like to do next?</p>
                 </div>
               </div>
+
+              {/* Include Fields — field-level control over what reaches the customer view */}
+              {(() => {
+                const included = draftItems.filter(it => it.includeInGCI !== false);
+                const OPTIONAL_FIELDS: [keyof typeof sqIncludeFields, string][] = [
+                  ['deliveryTime', 'Delivery Time'], ['packaging', 'Packaging'], ['remarks', 'Remarks'],
+                  ['moq', 'MOQ'], ['paymentTerms', 'Payment Terms'],
+                ];
+                return (
+                  <div className="bg-white border border-[#0C1B3A]/8 rounded-[20px] p-6 space-y-4">
+                    <div>
+                      <h4 className="text-[13px] font-black text-[#0C1B3A]">Include Fields — what the customer sees</h4>
+                      <p className="text-[11px] text-[#0C1B3A]/45 mt-0.5">Supplier Cost Items is your internal view. Choose what carries over into the GCI Quote.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-[11px]">
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                        <p className="font-black uppercase tracking-wider text-green-700 text-[9px] mb-1.5">Always shown to customer</p>
+                        <p className="text-green-800/80 leading-relaxed">English Description, Specification, Size/Dimension, Material, Color, Unit, Qty, Customer Unit Price, Customer Line Total</p>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                        <p className="font-black uppercase tracking-wider text-red-700 text-[9px] mb-1.5">Never shown to customer</p>
+                        <p className="text-red-800/80 leading-relaxed">Supplier Name/Contact, Supplier Unit Cost, Supplier Currency, Exchange Rate, Margin %, Internal Notes</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="font-black uppercase tracking-wider text-[#0C1B3A]/40 text-[9px] mb-2">Optional — include if checked</p>
+                      <div className="flex flex-wrap gap-4">
+                        {OPTIONAL_FIELDS.map(([key, label]) => (
+                          <label key={key} className="flex items-center gap-2 text-[12px] font-bold text-[#0C1B3A]/70 cursor-pointer">
+                            <input type="checkbox" checked={sqIncludeFields[key]}
+                              onChange={e => setSqIncludeFields(prev => ({ ...prev, [key]: e.target.checked }))}
+                              className="w-3.5 h-3.5 accent-[#C9A84C] cursor-pointer" />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-[#0C1B3A]/35">{included.length} of {draftItems.length} items selected for the GCI Quote (toggle "Include in GCI Quote" per row above).</p>
+                  </div>
+                );
+              })()}
 
               {/* PRIMARY: Convert to GCI Quote */}
               <button
@@ -3931,11 +3988,14 @@ export default function App() {
 
 For each item, also produce a professional English description (do not translate word-for-word — write it the way it would appear on a formal quotation), while keeping the original supplier text untouched.
 
+Also look for the supplier's own name and contact info (phone/email/WeChat) printed on the document, if any.
+
 Return ONLY valid JSON:
 {"items":[{
   "originalName":"name as written by supplier (keep Chinese if Chinese)",
   "englishDescription":"professional English description of the item",
-  "originalSpec":"size/spec/dimensions",
+  "originalSpec":"full spec/description text",
+  "sizeDimension":"explicit size or dimensions only, e.g. 2000*850*670mm, if distinguishable from general spec",
   "model":"model or SKU number if any",
   "material":"material description",
   "color":"color if mentioned",
@@ -3946,7 +4006,7 @@ Return ONLY valid JSON:
   "deliveryTime":"lead/delivery time if mentioned",
   "paymentTerms":"payment terms if mentioned",
   "remarks":"any other notes for this item"
-}],"terms":"..."}
+}],"terms":"...","supplierInfo":{"name":"supplier name if visible","contact":"phone/email/contact if visible"}}
 Leave a field as empty string if not present. Never fabricate values.`;
 
       // ── Step 4: Gemini call (25s timeout for China network) ──────────
@@ -3996,11 +4056,13 @@ Leave a field as empty string if not present. Never fabricate values.`;
       console.log('[PDF] Step 6 items:', extractedItems.length, '| terms:', extractedTerms.slice(0, 80));
 
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+      applyDetectedSupplierInfo(parsed.supplierInfo);
 
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-pdf-${Date.now()}-${idx}`,
         status: 'Need Review' as const,
+        sourceType: 'pdf' as const,
       }));
 
       if (rows.length === 0) {
@@ -4067,6 +4129,131 @@ Leave a field as empty string if not present. Never fabricate values.`;
     setAppMode('customer-quote');
     setView('configurator');
     setShowCurrencyModal(false);
+  };
+
+  /** Auto-fills Supplier Name/Contact from AI-detected info — only if the user hasn't typed one in already. */
+  const applyDetectedSupplierInfo = (info?: { name?: string; contact?: string }) => {
+    if (!info) return;
+    setSupplierMeta(prev => ({
+      ...prev,
+      supplierName: prev.supplierName || info.name || prev.supplierName,
+      supplierContact: prev.supplierContact || info.contact || prev.supplierContact,
+    }));
+  };
+
+  const MAX_OCR_IMAGES = 12; // cap Gemini Vision payload size/cost per Excel upload
+
+  /**
+   * Reads text/specs OUT of Excel embedded images (DISPIMG + floating), not just displays them.
+   * - Images whose Excel row matches a parsed item: fill that item's EMPTY fields only (never
+   *   overwrites existing data), append OCR notes to remarks, flag dataConfidence='low' if unsure.
+   * - Images with no matching row: pushed onto `rows` as new independent items,
+   *   sourceType='excel-image-ocr', includeInGCI defaulted to false pending user review.
+   * Mutates `rows` in place. Never throws — caller treats failure as non-fatal.
+   */
+  const ocrAndMergeExcelImages = async (args: {
+    imgDataUrls: Record<string, string>;
+    floatingBySheet: Record<string, Record<number, string>>;
+    sheetName: string;
+    colImg: number;
+    dataRows: any[];
+    headerRowOffset: number;
+    rows: any[];
+    rowIdxToItemIndex: Record<number, number>;
+    supplierCurrency: string;
+  }) => {
+    const { imgDataUrls, floatingBySheet, sheetName, colImg, dataRows, headerRowOffset, rows, rowIdxToItemIndex, supplierCurrency } = args;
+
+    // Collect every embedded image with its Excel row index (dedup by row, DISPIMG wins over floating)
+    const byRow: Record<number, string> = {};
+    const floatMap = floatingBySheet[sheetName] || {};
+    for (const [rowIdxStr, dataUrl] of Object.entries(floatMap)) byRow[Number(rowIdxStr)] = dataUrl;
+    if (colImg !== -1) {
+      dataRows.forEach((row: any, idx: number) => {
+        const cell = String(row[colImg] || '');
+        const m = cell.match(/ID_([A-F0-9]+)/i);
+        if (m) {
+          const url = imgDataUrls[`ID_${m[1].toUpperCase()}`];
+          if (url) byRow[headerRowOffset + idx] = url;
+        }
+      });
+    }
+    const entries = Object.entries(byRow).map(([rowIdxStr, dataUrl]) => ({ rowIdx: Number(rowIdxStr), dataUrl }));
+    if (entries.length === 0) return;
+
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) { console.warn('[ocrAndMergeExcelImages] No Gemini API key — skipping OCR, images still shown as thumbnails.'); return; }
+
+    const capped = entries.slice(0, MAX_OCR_IMAGES);
+    if (entries.length > MAX_OCR_IMAGES) {
+      console.warn(`[ocrAndMergeExcelImages] ${entries.length} embedded images found, OCR-ing first ${MAX_OCR_IMAGES} only.`);
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const imageParts = capped.map(e => {
+      const m = e.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      return { inlineData: { mimeType: m?.[1] || 'image/png', data: m?.[2] || '' } };
+    });
+    const prompt = `You are reading ${capped.length} photo(s) extracted from inside a supplier's Excel quote (usually one per product row, occasionally a logo or unrelated image). They are attached in order, index 0 to ${capped.length - 1}.
+For EACH photo, read any visible text (model number, dimensions/size, material, color, labels) and the product shown.
+Return ONLY a JSON array, same length and order, of:
+{"index":0,"productDetected":true,"model":"","material":"","color":"","sizeDimension":"","remarks":"","confidenceLevel":"high"}
+Set "productDetected":false if the photo is a logo, blank, or has no identifiable product — leave other fields empty in that case. Leave any field empty string if not visible. Set "confidenceLevel":"low" if you are guessing. Never fabricate values.`;
+
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: [{ role: 'user', parts: [{ text: prompt }, ...imageParts] }],
+          config: { responseMimeType: 'application/json' },
+        }),
+        25000, 'Excel Embedded Image OCR'
+      );
+      const results: any[] = JSON.parse(response.text || '[]');
+      if (!Array.isArray(results)) return;
+
+      results.forEach((res, i) => {
+        const entry = capped[i];
+        if (!entry || !res) return;
+        const conf: 'high' | 'low' = res.confidenceLevel === 'low' ? 'low' : 'high';
+        const itemIdx = rowIdxToItemIndex[entry.rowIdx];
+
+        if (itemIdx !== undefined) {
+          // Matched to an existing parsed row — supplement only, never overwrite
+          const item = rows[itemIdx];
+          if (!item.model && res.model) item.model = res.model;
+          if (!item.material && res.material) item.material = res.material;
+          if (!item.color && res.color) item.color = res.color;
+          if (!item.sizeDimension && res.sizeDimension) item.sizeDimension = res.sizeDimension;
+          const noteBits: string[] = [];
+          if (res.remarks) noteBits.push(`[Image OCR] ${res.remarks}`);
+          if (conf === 'low') { item.dataConfidence = 'low'; noteBits.push('[Low confidence — verify against photo]'); }
+          if (noteBits.length) item.remarks = item.remarks ? `${item.remarks} | ${noteBits.join(' | ')}` : noteBits.join(' | ');
+        } else if (res.productDetected) {
+          // No matching parsed row — independent item, defaults unchecked pending review
+          rows.push({
+            id: `sq-imgocr-${Date.now()}-${entry.rowIdx}`,
+            originalName: res.model || 'Unidentified item (from embedded Excel image)',
+            englishDescription: [res.model, res.material].filter(Boolean).join(' — ') || 'Identified from an embedded Excel image — please review',
+            originalSpec: res.sizeDimension || '',
+            sizeDimension: res.sizeDimension || '',
+            imageDataUrl: entry.dataUrl,
+            model: res.model || '', material: res.material || '', color: res.color || '',
+            remarks: res.remarks || '',
+            quantity: 1, unit: 'pc', targetUnitPrice: 0, targetTotal: 0,
+            originalCurrency: supplierCurrency,
+            status: 'Need Review' as const,
+            suggestedCategory: FurnitureCategory.OTHER,
+            confidence: 0.4,
+            sourceType: 'excel-image-ocr' as const,
+            dataConfidence: conf,
+            includeInGCI: false,
+          });
+        }
+      });
+    } catch (err) {
+      console.warn('[ocrAndMergeExcelImages] Gemini OCR call failed (non-fatal, images remain as thumbnails only):', err);
+    }
   };
 
   const parseExcel = async (file: File) => {
@@ -4252,12 +4439,14 @@ Leave a field as empty string if not present. Never fabricate values.`;
           const colDelivery = findColLocal(['delivery','lead time','交期','交货']);
           const colPayment  = findColLocal(['payment','付款']);
           const colRemarks  = findColLocal(['remark','note','备注']);
+          const colSize     = findColLocal(['size','dimension','尺寸']);
 
           const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
           const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','合价','grand'];
           const NOTE_PREFIXES = ['注：','注:','备注','note:','note：','*','（注','(注'];
           const headerRowOffset = bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1;
           const rows: any[] = [];
+          const rowIdxToItemIndex: Record<number, number> = {}; // origRowIdx → index in `rows`, used to merge image OCR results
           dataRows.forEach((row: any, idx: number) => {
             const origRowIdx = headerRowOffset + idx; // 0-based Excel row, matches floating-image anchors
             const name = String(row[autoMappings.item] || '').trim();
@@ -4298,6 +4487,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
               originalName: name,
               englishDescription,
               originalSpec: rawSpec,
+              sizeDimension: colSize !== -1 ? String(row[colSize] || '').trim() : '',
               imageDataUrl,
               model:    colModel    !== -1 ? String(row[colModel] || '').trim()    : '',
               material: rawMaterial,
@@ -4317,8 +4507,31 @@ Leave a field as empty string if not present. Never fabricate values.`;
               status: 'Confirmed' as const,
               suggestedCategory: FurnitureCategory.OTHER,
               confidence: 1,
+              sourceType: 'excel' as const,
             });
+            rowIdxToItemIndex[origRowIdx] = rows.length - 1;
           });
+
+          // ── Embedded image OCR / Vision: read text & specs out of Excel DISPIMG/floating
+          // images, not just display them. Matched images enrich their row (only empty fields,
+          // never overwrites user/AI data already present); unmatched images become independent
+          // "Need Review" items tagged sourceType='excel-image-ocr'. Never blocks parsing on failure.
+          try {
+            await ocrAndMergeExcelImages({
+              imgDataUrls: sqImgDataUrls,
+              floatingBySheet: sqFloatingBySheet,
+              sheetName: firstSheetName,
+              colImg,
+              dataRows,
+              headerRowOffset,
+              rows,
+              rowIdxToItemIndex,
+              supplierCurrency: supplierMeta.currency || 'AED',
+            });
+          } catch (ocrErr) {
+            console.warn('[parseExcel] Embedded image OCR failed (non-fatal, rows kept as-is):', ocrErr);
+          }
+
           console.log('[parseExcel] Final parsed rows:', rows.length, rows.map(r => r.originalName));
           if (rows.length === 0) {
             const msg = 'No items found in Excel. Check that item names and prices are in the correct columns.';
@@ -4447,6 +4660,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
               "originalName": "Item name as written by supplier (keep Chinese if Chinese)",
               "englishDescription": "Professional English description",
               "originalSpec": "Size/Spec/Description/dimensions",
+              "sizeDimension": "Explicit size or dimensions only, e.g. 2000*850*670mm, if distinguishable from general spec",
               "model": "Model or SKU number if any",
               "material": "Material description if mentioned",
               "color": "Color if mentioned",
@@ -4462,7 +4676,8 @@ Leave a field as empty string if not present. Never fabricate values.`;
               "remarks": "Any other notes for this item"
             }
           ],
-          "terms": "Payment: ... | Lead time: ... | Notes: ..."
+          "terms": "Payment: ... | Lead time: ... | Notes: ...",
+          "supplierInfo": { "name": "supplier name if visible", "contact": "phone/email/contact if visible" }
         }
         Leave a field as empty string if not present — never fabricate values. If no terms found, set terms to "". If no items found, set items to [].
       `;
@@ -4482,10 +4697,12 @@ Leave a field as empty string if not present. Never fabricate values.`;
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
       const extractedTerms: string = parsed.terms || '';
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+      applyDetectedSupplierInfo(parsed.supplierInfo);
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-img-${Date.now()}-${idx}`,
-        status: 'Need Review' as const
+        status: 'Need Review' as const,
+        sourceType: 'image' as const,
       }));
 
       await processWithAI(rows);
@@ -4553,13 +4770,14 @@ Return ONLY valid JSON:
   "originalName":"name as written by supplier (keep Chinese if Chinese)",
   "englishDescription":"professional English description",
   "originalSpec":"size/spec/dimensions",
+  "sizeDimension":"explicit size or dimensions only, e.g. 2000*850*670mm, if distinguishable from general spec",
   "model":"model or SKU if any","material":"material","color":"color if mentioned",
   "quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0,
   "originalCurrency":"currency code if visible e.g. RMB/USD/AED",
   "moq":"minimum order quantity if mentioned","packaging":"packaging method if mentioned",
   "deliveryTime":"lead/delivery time if mentioned","paymentTerms":"payment terms if mentioned",
   "remarks":"any other notes for this item"
-}],"terms":"..."}
+}],"terms":"...","supplierInfo":{"name":"supplier name if visible","contact":"phone/email/contact if visible"}}
 Leave a field as empty string if not present. Never fabricate values.`;
 
       const response = await withTimeout(
@@ -4576,11 +4794,13 @@ Leave a field as empty string if not present. Never fabricate values.`;
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
       const extractedTerms: string = parsed.terms || '';
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+      applyDetectedSupplierInfo(parsed.supplierInfo);
 
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-docx-${Date.now()}-${idx}`,
         status: 'Need Review' as const,
+        sourceType: 'docx' as const,
       }));
 
       if (rows.length === 0) {
@@ -4634,6 +4854,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
               "originalName": "Item name as written by supplier (keep Chinese if Chinese)",
               "englishDescription": "Professional English description",
               "originalSpec": "Size/Spec/Description",
+              "sizeDimension": "Explicit size or dimensions only, e.g. 2000*850*670mm, if distinguishable from general spec",
               "model": "Model or SKU number if any",
               "material": "Material description if mentioned",
               "color": "Color if mentioned",
@@ -4649,7 +4870,8 @@ Leave a field as empty string if not present. Never fabricate values.`;
               "remarks": "Any other notes for this item"
             }
           ],
-          "terms": "Payment: ... | Lead time: ... | Notes: ..."
+          "terms": "Payment: ... | Lead time: ... | Notes: ...",
+          "supplierInfo": { "name": "supplier name if visible", "contact": "phone/email/contact if visible" }
         }
         Leave a field as empty string if not present. If no terms found, set terms to "". If no items found, set items to [].
       `;
@@ -4663,10 +4885,12 @@ Leave a field as empty string if not present. Never fabricate values.`;
       const extractedItems: any[] = Array.isArray(parsed) ? parsed : (parsed.items || []);
       const extractedTerms: string = parsed.terms || '';
       if (extractedTerms) setTradeTerms(prev => prev ? `${prev}\n${extractedTerms}` : extractedTerms);
+      applyDetectedSupplierInfo(parsed.supplierInfo);
       const rows = extractedItems.map((it: any, idx: number) => ({
         ...it,
         id: `draft-text-${Date.now()}-${idx}`,
-        status: 'Need Review' as const
+        status: 'Need Review' as const,
+        sourceType: 'text' as const,
       }));
 
       await processWithAI(rows);
