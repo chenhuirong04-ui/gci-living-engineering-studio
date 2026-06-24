@@ -330,7 +330,8 @@ export default function App() {
   const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
 
   // ── Module 4: Service Quote — fully standalone, no link to inventory/SKU/supplier cost ──
-  const [svcView, setSvcView] = useState<'list' | 'editor' | 'catalog'>('list');
+  const [svcView, setSvcView] = useState<'list' | 'category' | 'items' | 'editor' | 'catalog'>('list');
+  const [svcActiveCategoryId, setSvcActiveCategoryId] = useState<string | null>(null);
   const [svcCategories, setSvcCategories] = useState<ServiceCategory[]>([]);
   const [svcCatalog, setSvcCatalog] = useState<ServiceCatalogItem[]>([]);
   const [svcCatalogLoaded, setSvcCatalogLoaded] = useState(false);
@@ -349,7 +350,6 @@ export default function App() {
     billingLabel: string; lineTotal: number; totalOverridden: boolean;
   };
   const [svcItems, setSvcItems] = useState<SvcLineItem[]>([]);
-  const [svcShowPicker, setSvcShowPicker] = useState(false);
   const [svcPickerSearch, setSvcPickerSearch] = useState('');
   const [svcNewCatName, setSvcNewCatName] = useState({ cn: '', en: '' });
   const [svcNewItem, setSvcNewItem] = useState({ categoryId: '', cn: '', en: '', unit: '项', billing: 'fixed' as ServiceBillingType });
@@ -1591,14 +1591,23 @@ export default function App() {
   };
 
   // ── Module 4: Service Quote — render ──────────────────────────────────────────
+  const SVC_CATEGORY_ICONS: Record<string, any> = {
+    '企业服务': Building2,
+    '市场进入与商务拓展': Briefcase,
+    '项目服务': Layers,
+    '海外仓与物流服务': Anchor,
+    '供应链服务': Package,
+    'AI数字化解决方案': Cpu,
+  };
+
   const renderServiceQuoteModule = () => {
-    const catalogByCategory = svcCategories.map(cat => ({
-      cat,
-      items: svcCatalog.filter(it => it.category_id === cat.id &&
-        (!svcPickerSearch.trim() ||
-          it.name_cn.includes(svcPickerSearch) ||
-          it.name_en.toLowerCase().includes(svcPickerSearch.toLowerCase()))),
-    })).filter(g => g.items.length > 0 || !svcPickerSearch.trim());
+    const startNewQuote = () => {
+      svcLoadCatalog();
+      setSvcMeta({ quoteNo: generateServiceQuoteNo(), customerName: '', contactPerson: '', quoteDate: new Date().toISOString().split('T')[0], currency: 'AED', projectDuration: '', paymentTerms: PAYMENT_TERM_OPTIONS[0], notes: '' });
+      setSvcItems([]); setSvcSavedId(null); setSvcSaveStatus('idle');
+      setSvcActiveCategoryId(null); setSvcPickerSearch('');
+      setSvcView('category');
+    };
 
     // ── List view: saved Service Quotes ───────────────────────────────────────
     if (svcView === 'list') {
@@ -1615,12 +1624,7 @@ export default function App() {
                 Manage Catalog
               </button>
               <button
-                onClick={() => {
-                  svcLoadCatalog();
-                  setSvcMeta({ quoteNo: generateServiceQuoteNo(), customerName: '', contactPerson: '', quoteDate: new Date().toISOString().split('T')[0], currency: 'AED', projectDuration: '', paymentTerms: PAYMENT_TERM_OPTIONS[0], notes: '' });
-                  setSvcItems([]); setSvcSavedId(null); setSvcSaveStatus('idle');
-                  setSvcView('editor');
-                }}
+                onClick={startNewQuote}
                 className="px-6 py-3 rounded-[16px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg"
                 style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}
               >
@@ -1651,6 +1655,122 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Category picker: step 1 of building a new quote ───────────────────────
+    if (svcView === 'category') {
+      return (
+        <div className="space-y-8 animate-in fade-in duration-500">
+          <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
+            <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
+          </button>
+          <div className="text-center space-y-2">
+            <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Step 1 of 3</span>
+            <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Choose a Service Category</h2>
+            <p className="text-[11px] text-[#0C1B3A]/45">请选择服务分类</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-4xl mx-auto">
+            {svcCategories.map(cat => {
+              const Icon = SVC_CATEGORY_ICONS[cat.name_cn] || Package;
+              const count = svcCatalog.filter(it => it.category_id === cat.id).length;
+              return (
+                <button key={cat.id}
+                  onClick={() => { setSvcActiveCategoryId(cat.id || null); setSvcPickerSearch(''); setSvcView('items'); }}
+                  className="group text-left p-7 bg-white border-2 border-[#0C1B3A]/8 rounded-[28px] hover:border-[#C9A84C] hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 flex flex-col gap-3"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-[#0C1B3A]/4 group-hover:bg-[#C9A84C]/12 flex items-center justify-center transition-colors">
+                    <Icon className="w-6 h-6 text-[#0C1B3A]/40 group-hover:text-[#C9A84C] transition-colors" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px] font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">{cat.name_cn}</h3>
+                    <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">{cat.name_en}</p>
+                  </div>
+                  <p className="text-[10px] text-[#0C1B3A]/30 mt-auto">{count} service{count === 1 ? '' : 's'}</p>
+                </button>
+              );
+            })}
+            {svcCategories.length === 0 && (
+              <p className="col-span-3 text-center text-[#0C1B3A]/30 text-[12px] py-10">Loading catalog... 正在加载服务目录</p>
+            )}
+          </div>
+          {svcItems.length > 0 && (
+            <div className="flex justify-center">
+              <button onClick={() => setSvcView('editor')} className="px-8 py-3.5 rounded-[16px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2" style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}>
+                {svcItems.length} service{svcItems.length === 1 ? '' : 's'} selected · Continue to Quote <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Items picker: step 2 — browse/select services within a category ───────
+    if (svcView === 'items') {
+      const activeCat = svcCategories.find(c => c.id === svcActiveCategoryId);
+      const visibleItems = svcCatalog.filter(it => it.category_id === svcActiveCategoryId &&
+        (!svcPickerSearch.trim() || it.name_cn.includes(svcPickerSearch) || it.name_en.toLowerCase().includes(svcPickerSearch.toLowerCase())));
+      return (
+        <div className="space-y-6 animate-in fade-in duration-500 pb-24">
+          <button onClick={() => setSvcView('category')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
+            <ChevronLeft className="w-4 h-4" /> All Categories
+          </button>
+
+          {/* Category tabs — switch without losing selected items */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {svcCategories.map(cat => (
+              <button key={cat.id} onClick={() => { setSvcActiveCategoryId(cat.id || null); setSvcPickerSearch(''); }}
+                className="px-4 py-2 rounded-full text-[11px] font-bold whitespace-nowrap transition-all"
+                style={cat.id === svcActiveCategoryId ? { backgroundColor: '#0C1B3A', color: '#C9A84C' } : { backgroundColor: '#0C1B3A0A', color: '#0C1B3A80' }}
+              >
+                {cat.name_cn}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-xl font-serif italic text-[#0C1B3A]">{activeCat?.name_cn} <span className="text-[#0C1B3A]/30 text-[14px]">{activeCat?.name_en}</span></h2>
+            <div className="flex items-center gap-3">
+              <input value={svcPickerSearch} onChange={e => setSvcPickerSearch(e.target.value)} placeholder="Search services... 搜索服务" className="flex-1 max-w-md bg-white border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[12px] outline-none focus:border-[#C9A84C]" />
+              <button onClick={svcAddCustomItem} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider border border-dashed border-[#0C1B3A]/20 text-[#0C1B3A]/50 hover:border-[#C9A84C] hover:text-[#0C1B3A] whitespace-nowrap transition-colors">+ Custom Service</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleItems.map(it => {
+              const added = svcItems.some(si => si.serviceName === `${it.name_cn} / ${it.name_en}`);
+              return (
+                <button key={it.id} onClick={() => svcAddItemFromCatalog(it)}
+                  disabled={added}
+                  className={`text-left p-5 rounded-[20px] border-2 transition-all ${added ? 'bg-[#C9A84C]/8 border-[#C9A84C]/30 cursor-default' : 'bg-white border-[#0C1B3A]/8 hover:border-[#C9A84C] hover:shadow-md'}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[13px] font-black text-[#0C1B3A]">{it.name_cn}</p>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">{it.name_en}</p>
+                    </div>
+                    {added ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C] shrink-0" /> : <Plus className="w-4 h-4 text-[#0C1B3A]/20 shrink-0" />}
+                  </div>
+                  <p className="text-[9px] text-[#0C1B3A]/30 mt-3 uppercase font-bold tracking-wider">{it.default_unit} · {BILLING_TYPE_LABELS[it.default_billing_type]}</p>
+                </button>
+              );
+            })}
+            {visibleItems.length === 0 && (
+              <p className="col-span-3 text-center text-[#0C1B3A]/30 text-[12px] py-10">No services match "{svcPickerSearch}". Try "+ Custom Service" instead.</p>
+            )}
+          </div>
+
+          {/* Sticky cart bar */}
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#0C1B3A]/10 shadow-2xl px-6 py-4 flex items-center justify-between z-20">
+            <p className="text-[12px] font-bold text-[#0C1B3A]/60">{svcItems.length} service{svcItems.length === 1 ? '' : 's'} selected 已选择</p>
+            <button onClick={() => setSvcView('editor')} disabled={svcItems.length === 0}
+              className="px-8 py-3 rounded-[14px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 disabled:opacity-30 transition-all"
+              style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}
+            >
+              Continue to Quote 进入报价单 <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       );
@@ -1741,171 +1861,220 @@ export default function App() {
       );
     }
 
-    // ── Editor view ─────────────────────────────────────────────────────────────
+    // ── Editor view: formatted quote document + live preview ──────────────────
+    const billingLabelOf = (it: SvcLineItem) => it.billingType === 'custom' && it.billingLabel ? it.billingLabel : BILLING_TYPE_LABELS[it.billingType];
+
+    const QuotePreview = () => (
+      <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 shadow-sm overflow-hidden">
+        <div className="px-6 py-4" style={{ backgroundColor: '#0C1B3A' }}>
+          <p className="text-[12px] font-black text-white">GLOBALCARE INFO GENERAL TRADING FZCO</p>
+          <p className="text-[9px] mt-0.5" style={{ color: '#C9A84C' }}>SERVICE QUOTATION · 服务报价单</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-[10.5px]">
+            <div><p className="text-[#0C1B3A]/35 uppercase font-bold text-[8px]">Quote No</p><p className="font-bold text-[#0C1B3A]">{svcMeta.quoteNo}</p></div>
+            <div><p className="text-[#0C1B3A]/35 uppercase font-bold text-[8px]">Date</p><p className="font-bold text-[#0C1B3A]">{svcMeta.quoteDate}</p></div>
+            <div><p className="text-[#0C1B3A]/35 uppercase font-bold text-[8px]">Customer</p><p className="font-bold text-[#0C1B3A]">{svcMeta.customerName || '—'}</p></div>
+            <div><p className="text-[#0C1B3A]/35 uppercase font-bold text-[8px]">Contact</p><p className="font-bold text-[#0C1B3A]">{svcMeta.contactPerson || '—'}</p></div>
+          </div>
+          <div className="border-t border-[#0C1B3A]/8 pt-4 space-y-3">
+            {svcItems.length === 0 ? (
+              <p className="text-[11px] text-[#0C1B3A]/30 text-center py-6">No services added yet</p>
+            ) : svcItems.map(it => (
+              <div key={it.id} className="flex items-start justify-between gap-3 text-[11px]">
+                <div className="flex-1">
+                  <p className="font-bold text-[#0C1B3A]">{it.serviceName}</p>
+                  {it.description && <p className="text-[#0C1B3A]/40 text-[10px] mt-0.5">{it.description}</p>}
+                  <p className="text-[#0C1B3A]/30 text-[9px] mt-0.5">{it.quantity} {it.unit} × {it.unitPrice.toFixed(2)} · {billingLabelOf(it)}</p>
+                </div>
+                <p className="font-black font-mono text-[#0C1B3A] shrink-0">{it.lineTotal.toFixed(2)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-[#0C1B3A]/8 pt-4 flex items-center justify-between">
+            <p className="text-[11px] font-black uppercase tracking-wider text-[#0C1B3A]">Total</p>
+            <p className="text-xl font-black font-mono" style={{ color: '#0C1B3A' }}>{svcMeta.currency} {svcGrandTotal().toFixed(2)}</p>
+          </div>
+          {(svcMeta.projectDuration || svcMeta.paymentTerms) && (
+            <div className="border-t border-[#0C1B3A]/8 pt-4 space-y-1.5 text-[10.5px]">
+              {svcMeta.projectDuration && <p><span className="text-[#0C1B3A]/40 font-bold">Project Duration: </span><span className="text-[#0C1B3A]">{svcMeta.projectDuration}</span></p>}
+              {svcMeta.paymentTerms && <p><span className="text-[#0C1B3A]/40 font-bold">Payment Terms: </span><span className="text-[#0C1B3A]">{svcMeta.paymentTerms}</span></p>}
+            </div>
+          )}
+          {svcMeta.notes && (
+            <div className="border-t border-[#0C1B3A]/8 pt-4">
+              <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/35 mb-1">Notes</p>
+              <p className="text-[10.5px] text-[#0C1B3A]/70 whitespace-pre-line">{svcMeta.notes}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+
     return (
-      <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="space-y-6 animate-in fade-in duration-500">
         <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
           <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
         </button>
 
         <div className="flex items-center gap-3">
-          <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Service Quote</span>
+          <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Step 3 of 3</span>
           <h2 className="text-2xl font-serif italic text-[#0C1B3A]">{svcMeta.quoteNo}</h2>
         </div>
 
-        {/* Quote meta */}
-        <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-6 grid grid-cols-3 gap-5">
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Customer Name 客户名称</label>
-            <input value={svcMeta.customerName} onChange={e => setSvcMeta(p => ({ ...p, customerName: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]" />
-          </div>
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Contact Person 联系人</label>
-            <input value={svcMeta.contactPerson} onChange={e => setSvcMeta(p => ({ ...p, contactPerson: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
-          </div>
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Quote Date 日期</label>
-            <input type="date" value={svcMeta.quoteDate} onChange={e => setSvcMeta(p => ({ ...p, quoteDate: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
-          </div>
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Currency 币种</label>
-            <select value={svcMeta.currency} onChange={e => setSvcMeta(p => ({ ...p, currency: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]">
-              {['AED','USD','CNY'].map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Project Duration 项目周期</label>
-            <input value={svcMeta.projectDuration} onChange={e => setSvcMeta(p => ({ ...p, projectDuration: e.target.value }))} placeholder="e.g. 3 months / 长期" className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] placeholder:text-[#0C1B3A]/20" />
-          </div>
-          <div>
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Payment Terms 付款方式</label>
-            <select value={svcMeta.paymentTerms} onChange={e => setSvcMeta(p => ({ ...p, paymentTerms: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]">
-              {PAYMENT_TERM_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
-          <div className="col-span-3">
-            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Notes 备注</label>
-            <textarea value={svcMeta.notes} onChange={e => setSvcMeta(p => ({ ...p, notes: e.target.value }))} rows={2} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] resize-none" />
-          </div>
-        </div>
-
-        {/* Items */}
-        <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
-          <div className="px-6 py-4 flex items-center justify-between border-b border-[#0C1B3A]/8">
-            <h4 className="text-[13px] font-black text-[#0C1B3A]">Service Items 服务项目</h4>
-            <button onClick={() => { svcLoadCatalog(); setSvcShowPicker(true); }} className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Add Service
-            </button>
-          </div>
-
-          {svcShowPicker && (
-            <div className="px-6 py-4 bg-[#0C1B3A]/3 border-b border-[#0C1B3A]/8 space-y-3">
-              <div className="flex items-center gap-3">
-                <input value={svcPickerSearch} onChange={e => setSvcPickerSearch(e.target.value)} placeholder="Search services... 搜索服务" className="flex-1 bg-white border border-[#0C1B3A]/10 rounded-xl px-4 py-2 text-[12px] outline-none focus:border-[#C9A84C]" />
-                <button onClick={svcAddCustomItem} className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] whitespace-nowrap">+ Custom Service</button>
-                <button onClick={() => setSvcShowPicker(false)} className="text-[#0C1B3A]/30 hover:text-[#0C1B3A]"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="max-h-72 overflow-y-auto space-y-3">
-                {catalogByCategory.map(({ cat, items }) => (
-                  <div key={cat.id}>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 mb-1">{cat.name_cn} / {cat.name_en}</p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {items.map(it => (
-                        <button key={it.id} onClick={() => svcAddItemFromCatalog(it)} className="text-left px-3 py-2 rounded-lg bg-white border border-[#0C1B3A]/6 hover:border-[#C9A84C] text-[11.5px] text-[#0C1B3A]/80 transition-colors">
-                          {it.name_cn} / {it.name_en}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 items-start">
+          {/* ── Left: editable quote form ───────────────────────────────────── */}
+          <div className="space-y-6">
+            {/* Customer info */}
+            <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-7 space-y-5">
+              <h4 className="text-[12px] font-black uppercase tracking-widest text-[#0C1B3A]/50">客户信息 Customer Information</h4>
+              <div className="grid grid-cols-2 gap-5">
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Customer Name 客户名称</label>
+                  <input value={svcMeta.customerName} onChange={e => setSvcMeta(p => ({ ...p, customerName: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Contact Person 联系人</label>
+                  <input value={svcMeta.contactPerson} onChange={e => setSvcMeta(p => ({ ...p, contactPerson: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Quote Date 日期</label>
+                  <input type="date" value={svcMeta.quoteDate} onChange={e => setSvcMeta(p => ({ ...p, quoteDate: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Currency 币种</label>
+                  <select value={svcMeta.currency} onChange={e => setSvcMeta(p => ({ ...p, currency: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]">
+                    {['AED','USD','CNY'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
-          )}
 
-          <div className="divide-y divide-[#0C1B3A]/6">
-            {svcItems.length === 0 ? (
-              <div className="p-12 text-center text-[#0C1B3A]/30 text-[12px]">No services added yet. 还没有添加服务项目。</div>
-            ) : svcItems.map(item => (
-              <div key={item.id} className="px-6 py-4 space-y-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <input value={item.serviceName} onChange={e => svcUpdateItem(item.id, { serviceName: e.target.value })}
-                      className="w-full text-[13px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
-                    <p className="text-[9px] text-[#0C1B3A]/30 mt-1">{item.categoryName}</p>
-                  </div>
-                  <button onClick={() => setSvcItems(prev => prev.filter(it => it.id !== item.id))} className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors shrink-0">
-                    <X className="w-3.5 h-3.5" />
+            {/* Service items — card style */}
+            <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-7 space-y-5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[12px] font-black uppercase tracking-widest text-[#0C1B3A]/50">服务项目 Service Items</h4>
+                <button onClick={() => setSvcView('items')} className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-1.5">
+                  <Plus className="w-4 h-4" /> Add More Services
+                </button>
+              </div>
+
+              {svcItems.length === 0 ? (
+                <div className="py-12 text-center text-[#0C1B3A]/30 text-[12px] border-2 border-dashed border-[#0C1B3A]/10 rounded-2xl">
+                  No services added yet. 还没有添加服务项目。
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {svcItems.map(item => (
+                    <div key={item.id} className="rounded-[20px] border border-[#0C1B3A]/8 p-5 space-y-3 bg-[#0C1B3A]/[0.015] hover:border-[#C9A84C]/40 transition-colors">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <input value={item.serviceName} onChange={e => svcUpdateItem(item.id, { serviceName: e.target.value })}
+                            className="w-full text-[14px] font-black text-[#0C1B3A] bg-transparent outline-none" />
+                          {item.categoryName && <p className="text-[9px] text-[#0C1B3A]/30 mt-0.5">{item.categoryName}</p>}
+                        </div>
+                        <button onClick={() => setSvcItems(prev => prev.filter(it => it.id !== item.id))} className="text-[#0C1B3A]/20 hover:text-red-400 transition-colors shrink-0 p-1">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <textarea value={item.description} onChange={e => svcUpdateItem(item.id, { description: e.target.value })} rows={2} placeholder="Service description / 服务描述" className="w-full text-[11.5px] text-[#0C1B3A]/60 bg-white border border-[#0C1B3A]/8 rounded-xl px-3 py-2 outline-none focus:border-[#C9A84C] resize-none placeholder:text-[#0C1B3A]/25" />
+                      <div className="grid grid-cols-5 gap-2.5 items-end">
+                        <div className={item.billingType === 'custom' ? '' : 'col-span-2'}>
+                          <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">计费方式 Billing</label>
+                          <select value={item.billingType} onChange={e => svcUpdateItem(item.id, { billingType: e.target.value as ServiceBillingType })} className="w-full text-[10.5px] bg-white border border-[#0C1B3A]/10 rounded-lg px-2 py-2 outline-none focus:border-[#C9A84C]">
+                            {Object.entries(BILLING_TYPE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                          </select>
+                        </div>
+                        {item.billingType === 'custom' && (
+                          <div>
+                            <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Label</label>
+                            <input value={item.billingLabel} onChange={e => svcUpdateItem(item.id, { billingLabel: e.target.value })} className="w-full text-[10.5px] bg-white border border-[#0C1B3A]/10 rounded-lg px-2 py-2 outline-none focus:border-[#C9A84C]" />
+                          </div>
+                        )}
+                        <div>
+                          <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">单位 Unit</label>
+                          <input value={item.unit} onChange={e => svcUpdateItem(item.id, { unit: e.target.value })} className="w-full text-[10.5px] text-center bg-white border border-[#0C1B3A]/10 rounded-lg px-2 py-2 outline-none focus:border-[#C9A84C]" />
+                        </div>
+                        <div>
+                          <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">数量 Qty</label>
+                          <input type="number" min="0" value={item.quantity} onChange={e => svcUpdateItem(item.id, { quantity: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-center bg-white border border-[#0C1B3A]/10 rounded-lg px-2 py-2 outline-none focus:border-[#C9A84C]" />
+                        </div>
+                        <div>
+                          <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">单价 Unit Price</label>
+                          <input type="number" min="0" step="0.01" value={item.unitPrice} onChange={e => svcUpdateItem(item.id, { unitPrice: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-right bg-white border border-[#0C1B3A]/10 rounded-lg px-2 py-2 outline-none focus:border-[#C9A84C]" />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#0C1B3A]/6">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40">小计 Subtotal {item.totalOverridden && <span className="text-[#C9A84C]">✎ manual</span>}</label>
+                        <input type="number" step="0.01" value={item.lineTotal} onChange={e => svcUpdateItem(item.id, { lineTotal: Number(e.target.value) || 0, totalOverridden: true })} className="w-32 text-[13px] font-mono font-black text-right bg-[#C9A84C]/8 border border-[#C9A84C]/30 rounded-lg px-3 py-1.5 outline-none focus:border-[#C9A84C]" />
+                        <span className="text-[11px] font-bold text-[#0C1B3A]/40">{svcMeta.currency}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Duration / Payment / Notes */}
+            <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-7 space-y-5">
+              <h4 className="text-[12px] font-black uppercase tracking-widest text-[#0C1B3A]/50">条款 Terms</h4>
+              <div className="grid grid-cols-2 gap-5">
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Project Duration 项目周期</label>
+                  <input value={svcMeta.projectDuration} onChange={e => setSvcMeta(p => ({ ...p, projectDuration: e.target.value }))} placeholder="e.g. 3 months / 长期" className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] placeholder:text-[#0C1B3A]/20" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Payment Terms 付款方式</label>
+                  <select value={svcMeta.paymentTerms} onChange={e => setSvcMeta(p => ({ ...p, paymentTerms: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]">
+                    {PAYMENT_TERM_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Notes 备注</label>
+                  <textarea value={svcMeta.notes} onChange={e => setSvcMeta(p => ({ ...p, notes: e.target.value }))} rows={2} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] resize-none" />
+                </div>
+              </div>
+            </div>
+
+            {/* Total + Actions */}
+            <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-7 space-y-5">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">总金额 Total</p>
+                <p className="text-3xl font-black font-mono text-[#0C1B3A]">{svcMeta.currency} {svcGrandTotal().toFixed(2)}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => handleSaveServiceQuote('Draft')} disabled={svcSaveStatus === 'saving'}
+                  className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+                  {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Draft 保存草稿'}
+                </button>
+                <button onClick={() => handleSaveServiceQuote('Final')} disabled={svcSaveStatus === 'saving'}
+                  className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest shadow-lg"
+                  style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}>
+                  {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Final 保存正式报价'}
+                </button>
+              </div>
+              {svcSaveStatus === 'saved' && (
+                <div className="grid grid-cols-3 gap-3 animate-in fade-in duration-300">
+                  <button onClick={generateServiceQuotePdf} className="py-3.5 rounded-[16px] text-[10.5px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all flex items-center justify-center gap-2">
+                    <FileText className="w-4 h-4" /> PDF
+                  </button>
+                  <button onClick={handleSendServiceQuoteToDeal} className="py-3.5 rounded-[16px] text-[10.5px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+                    Send to DEAL
+                  </button>
+                  <button onClick={handleSendServiceQuoteToTrade} className="py-3.5 rounded-[16px] text-[10.5px] font-black uppercase tracking-widest" style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}>
+                    Send to TRADE
                   </button>
                 </div>
-                <input value={item.description} onChange={e => svcUpdateItem(item.id, { description: e.target.value })} placeholder="Service description / 服务描述" className="w-full text-[11.5px] text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 placeholder:text-[#0C1B3A]/20" />
-                <div className="grid grid-cols-6 gap-2 items-end">
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Billing 计费方式</label>
-                    <select value={item.billingType} onChange={e => svcUpdateItem(item.id, { billingType: e.target.value as ServiceBillingType })} className="w-full text-[10.5px] bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]">
-                      {Object.entries(BILLING_TYPE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-                    </select>
-                  </div>
-                  {item.billingType === 'custom' && (
-                    <div>
-                      <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Custom Label</label>
-                      <input value={item.billingLabel} onChange={e => svcUpdateItem(item.id, { billingLabel: e.target.value })} className="w-full text-[10.5px] bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Unit</label>
-                    <input value={item.unit} onChange={e => svcUpdateItem(item.id, { unit: e.target.value })} className="w-full text-[10.5px] text-center bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
-                  </div>
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Qty</label>
-                    <input type="number" min="0" value={item.quantity} onChange={e => svcUpdateItem(item.id, { quantity: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-center bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
-                  </div>
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Unit Price</label>
-                    <input type="number" min="0" step="0.01" value={item.unitPrice} onChange={e => svcUpdateItem(item.id, { unitPrice: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-right bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
-                  </div>
-                  <div>
-                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Line Total {item.totalOverridden && <span className="text-[#C9A84C]">✎</span>}</label>
-                    <input type="number" step="0.01" value={item.lineTotal} onChange={e => svcUpdateItem(item.id, { lineTotal: Number(e.target.value) || 0, totalOverridden: true })} className="w-full text-[11px] font-mono font-black text-right bg-[#C9A84C]/8 border border-[#C9A84C]/30 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="px-6 py-5 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
-            <p className="text-[10px] text-[#0C1B3A]/35">{svcItems.length} service{svcItems.length === 1 ? '' : 's'}</p>
-            <div className="text-right">
-              <p className="text-[10px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total 总金额</p>
-              <p className="text-2xl font-black font-mono text-[#0C1B3A]">{svcMeta.currency} {svcGrandTotal().toFixed(2)}</p>
+              )}
             </div>
           </div>
-        </div>
 
-        {/* Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => handleSaveServiceQuote('Draft')} disabled={svcSaveStatus === 'saving'}
-            className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
-            {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Draft 保存草稿'}
-          </button>
-          <button onClick={() => handleSaveServiceQuote('Final')} disabled={svcSaveStatus === 'saving'}
-            className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest shadow-lg"
-            style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}>
-            {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Final 保存正式报价'}
-          </button>
-        </div>
-        {svcSaveStatus === 'saved' && (
-          <div className="grid grid-cols-3 gap-3 animate-in fade-in duration-300">
-            <button onClick={generateServiceQuotePdf} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all flex items-center justify-center gap-2">
-              <FileText className="w-4 h-4" /> Download PDF
-            </button>
-            <button onClick={handleSendServiceQuoteToDeal} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
-              Send to DEAL
-            </button>
-            <button onClick={handleSendServiceQuoteToTrade} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest" style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}>
-              Send to TRADE
-            </button>
+          {/* ── Right: live quote preview, sticky on desktop ────────────────── */}
+          <div className="lg:sticky lg:top-6 space-y-3">
+            <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/35 px-1">报价预览 Quote Preview — what the customer will see</p>
+            <QuotePreview />
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -3602,7 +3771,6 @@ export default function App() {
       description: '', unit: cat.default_unit, quantity: 1, unitPrice: 0,
       billingType: cat.default_billing_type, billingLabel: '', lineTotal: 0, totalOverridden: false,
     }]);
-    setSvcShowPicker(false);
   };
 
   const svcAddCustomItem = () => {
@@ -3612,7 +3780,6 @@ export default function App() {
       description: '', unit: '项', quantity: 1, unitPrice: 0,
       billingType: 'fixed', billingLabel: '', lineTotal: 0, totalOverridden: false,
     }]);
-    setSvcShowPicker(false);
   };
 
   const svcGrandTotal = () => svcItems.reduce((s, it) => s + it.lineTotal, 0);
