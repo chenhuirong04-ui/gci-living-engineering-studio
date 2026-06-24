@@ -4220,15 +4220,30 @@ Leave a field as empty string if not present. Never fabricate values.`;
             }
           }
 
-          // Detect which column (if any) holds embedded cell images (=DISPIMG formulas)
-          let colImg = -1;
-          for (let ci = 0; ci < (dataRows[0] || []).length; ci++) {
-            const colSample = dataRows.slice(0, 5).map((r: any) => String(r[ci] || ''));
-            if (colSample.some(v => v.includes('DISPIMG'))) { colImg = ci; break; }
+          // Detect which column (if any) holds embedded cell images — same two-step approach as
+          // Module 3 (Package Quote): try header keyword match first, then fall back to scanning
+          // data rows for DISPIMG formula text (handles headers that don't say "图片"/"description").
+          const findColLocal = (kList: string[]) => headers.findIndex((h: string) => kList.some(k => h === k || (h.length > 1 && h.includes(k))));
+          let colImg = findColLocal(['图片', 'description', '图']);
+          if (colImg === -1) {
+            for (let ci = 0; ci < (dataRows[0] || []).length; ci++) {
+              const colSample = dataRows.slice(0, 5).map((r: any) => String(r[ci] || ''));
+              if (colSample.some(v => v.includes('DISPIMG'))) { colImg = ci; break; }
+            }
+          } else {
+            // Header matched, but verify it actually contains DISPIMG data — if not, it's probably
+            // a real "description" text column, not the image column.
+            const colSample = dataRows.slice(0, 5).map((r: any) => String(r[colImg] || ''));
+            if (!colSample.some(v => v.includes('DISPIMG'))) {
+              colImg = -1;
+              for (let ci = 0; ci < (dataRows[0] || []).length; ci++) {
+                const sample = dataRows.slice(0, 5).map((r: any) => String(r[ci] || ''));
+                if (sample.some(v => v.includes('DISPIMG'))) { colImg = ci; break; }
+              }
+            }
           }
 
           // Extra detail columns — best-effort, missing column just means empty field
-          const findColLocal = (kList: string[]) => headers.findIndex((h: string) => kList.some(k => h === k || (h.length > 1 && h.includes(k))));
           const colModel   = findColLocal(['model','sku','型号','货号']);
           const colMaterial= findColLocal(['material','材质','材料']);
           const colColor   = findColLocal(['color','colour','颜色']);
