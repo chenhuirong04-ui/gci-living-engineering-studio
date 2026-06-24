@@ -2708,6 +2708,7 @@ export default function App() {
           color: it.color || '', moq: it.moq || '', packaging: it.packaging || '',
           delivery: it.deliveryTime || '', payment: it.paymentTerms || '',
           remarks: it.remarks || '', margin: it.marginPercent ?? null,
+          size: it.sizeDimension || '', inc: it.includeInGCI !== false,
           note: tradeItemNotes[it.id] || '',
         }),
         sort_order: i,
@@ -2759,6 +2760,9 @@ export default function App() {
         color: v2.color || '', moq: v2.moq || '', packaging: v2.packaging || '',
         deliveryTime: v2.delivery || '', paymentTerms: v2.payment || '',
         remarks: v2.remarks || '', marginPercent: v2.margin ?? undefined,
+        sizeDimension: v2.size || '',
+        // Old saves (pre-V3) have no `inc` key — default to included so nothing pre-existing disappears
+        includeInGCI: v2.inc !== undefined ? v2.inc !== false : true,
       };
     });
 
@@ -3039,6 +3043,25 @@ export default function App() {
     doc.save(`GCI-Quotation-${quoteInfo.quoteNumber || 'Draft'}.pdf`);
   };
 
+  // ── Module 2 (Supplier Quote → GCI Quote) customer-view field filter ──────────
+  // Gated strictly by quoteSource === 'supplier-archive' wherever it's called — the only
+  // entry into Trade Pricing Review that originates from Module 2. Direct Trade & Sourcing /
+  // BOQ uploads (quoteSource === null) and GCI history reload ('gci-history') are untouched.
+  // Always-customer-visible fields are combined here; Supplier Name/Contact, Supplier Unit
+  // Cost, Supplier Currency, Exchange Rate, Margin %, and Internal Notes are NEVER read by
+  // this function — they simply aren't referenced, so they cannot leak into its output.
+  const buildModule2CustomerDescription = (item: DraftItem): string => {
+    const desc = item.englishDescription?.trim() || item.originalName;
+    const specParts = [item.originalSpec, item.sizeDimension, item.material, item.color].filter(Boolean);
+    let out = specParts.length ? `${desc}\n${specParts.join(' | ')}` : desc;
+    if (sqIncludeFields.moq && item.moq) out += `\nMOQ: ${item.moq}`;
+    if (sqIncludeFields.packaging && item.packaging) out += `\nPackaging: ${item.packaging}`;
+    if (sqIncludeFields.deliveryTime && item.deliveryTime) out += `\nDelivery: ${item.deliveryTime}`;
+    if (sqIncludeFields.paymentTerms && item.paymentTerms) out += `\nPayment Terms: ${item.paymentTerms}`;
+    if (sqIncludeFields.remarks && item.remarks) out += `\nRemarks: ${item.remarks}`;
+    return out;
+  };
+
   // ── Trade & Sourcing PDF — customer-facing quote with selling prices + terms ──
   const generateTradePDF = (
     items: typeof draftItems,
@@ -3117,13 +3140,17 @@ export default function App() {
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(30, 30, 30);
+    const isModule2Quote = quoteSource === 'supplier-archive';
     items.forEach((item) => {
       if (y > 260) { doc.addPage(); y = 20; }
       const sp = sellingPrices[item.id] || 0;  // line total
       const lineTot = sp;                        // already line total
       const unitSellPrice = item.quantity > 0 ? sp / item.quantity : 0;
       doc.setFontSize(8.5);
-      const nameLines = doc.splitTextToSize(item.originalName + (item.originalSpec ? `\n${item.originalSpec}` : ''), colWidths[0] - 2);
+      const descText = isModule2Quote
+        ? buildModule2CustomerDescription(item)
+        : item.originalName + (item.originalSpec ? `\n${item.originalSpec}` : '');
+      const nameLines = doc.splitTextToSize(descText, colWidths[0] - 2);
       doc.text(nameLines, colX[0] + 1, y + 4);
       doc.text(String(item.quantity), colX[1] + colWidths[1] - 2, y + 4, { align: 'right' });
       doc.text(item.unit, colX[2] + 1, y + 4);
@@ -3154,13 +3181,16 @@ export default function App() {
     doc.text(`AED ${grandTotal.toFixed(2)}`, w - margin, y + 5.5, { align: 'right' });
     y += 14;
 
-    // Internal summary (light grey box)
-    doc.setFillColor(245, 245, 248);
-    doc.rect(margin, y, w - margin * 2, 10, 'F');
-    doc.setTextColor(120, 120, 120);
-    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
-    doc.text(`Supplier Cost: AED ${totalSupplierCost.toFixed(2)}  |  Profit: AED ${totalProfit.toFixed(2)}  |  Margin: ${overallMargin.toFixed(1)}%`, w / 2, y + 6.5, { align: 'center' });
-    y += 16;
+    // Internal summary (light grey box) — Supplier Cost/Profit/Margin must NEVER appear on a
+    // Module 2-sourced customer PDF (Supplier Unit Cost / Margin % are always-internal fields).
+    if (!isModule2Quote) {
+      doc.setFillColor(245, 245, 248);
+      doc.rect(margin, y, w - margin * 2, 10, 'F');
+      doc.setTextColor(120, 120, 120);
+      doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+      doc.text(`Supplier Cost: AED ${totalSupplierCost.toFixed(2)}  |  Profit: AED ${totalProfit.toFixed(2)}  |  Margin: ${overallMargin.toFixed(1)}%`, w / 2, y + 6.5, { align: 'center' });
+      y += 16;
+    }
 
     // Terms & Notes
     if (tradeTerms) {
@@ -5172,7 +5202,11 @@ Leave a field as empty string if not present. Never fabricate values.`;
 
   // ── Trade & Sourcing: Manual Pricing Review ─────────────────────────────
   const renderTradeQuoteReview = () => {
-    const confirmed = draftItems.filter(it => it.status === 'Confirmed');
+    // includeInGCI !== false is a no-op for direct Trade & Sourcing/BOQ uploads (that checkbox only
+    // exists in Module 2's Supplier Cost Items screen, so those items never have it set to false).
+    // For Module 2-sourced quotes it enforces row-level exclusion all the way through this screen,
+    // the "Send to TRADE" payload, and the generated PDF (all three read from this same `confirmed`).
+    const confirmed = draftItems.filter(it => it.status === 'Confirmed' && it.includeInGCI !== false);
     const totalSupplierCost = confirmed.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0);
     console.log('[Pricing View] Confirmed items:', confirmed.length, '| Supplier Total:', totalSupplierCost.toFixed(2));
     // sellingPrices[id] = LINE TOTAL (not unit price). No * quantity needed.
