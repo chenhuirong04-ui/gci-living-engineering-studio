@@ -335,6 +335,8 @@ export default function App() {
   const [svcCategories, setSvcCategories] = useState<ServiceCategory[]>([]);
   const [svcCatalog, setSvcCatalog] = useState<ServiceCatalogItem[]>([]);
   const [svcCatalogLoaded, setSvcCatalogLoaded] = useState(false);
+  const [svcCatalogLoading, setSvcCatalogLoading] = useState(false);
+  const [svcCatalogError, setSvcCatalogError] = useState('');
   const [svcQuotes, setSvcQuotes] = useState<ServiceQuote[]>([]);
   const [svcSavedId, setSvcSavedId] = useState<string | null>(null);
   const [svcSaveStatus, setSvcSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -1692,8 +1694,17 @@ export default function App() {
                 </button>
               );
             })}
-            {svcCategories.length === 0 && (
+            {svcCategories.length === 0 && svcCatalogLoading && (
               <p className="col-span-3 text-center text-[#0C1B3A]/30 text-[12px] py-10">Loading catalog... 正在加载服务目录</p>
+            )}
+            {svcCategories.length === 0 && !svcCatalogLoading && svcCatalogError && (
+              <div className="col-span-3 text-center py-10 space-y-4">
+                <p className="text-[12px] text-red-500/80 max-w-md mx-auto leading-relaxed">{svcCatalogError}</p>
+                <button onClick={() => svcLoadCatalog(true)}
+                  className="px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+                  Retry 重试
+                </button>
+              </div>
             )}
           </div>
           {svcItems.length > 0 && (
@@ -3784,13 +3795,24 @@ export default function App() {
 
   const svcGrandTotal = () => svcItems.reduce((s, it) => s + it.lineTotal, 0);
 
-  const svcLoadCatalog = async () => {
-    if (svcCatalogLoaded) return;
-    await seedDefaultCatalogIfEmpty().catch(() => {});
-    const [cats, items] = await Promise.all([listServiceCategories(), listServiceCatalogItems()]);
-    setSvcCategories(cats);
-    setSvcCatalog(items);
-    setSvcCatalogLoaded(true);
+  const svcLoadCatalog = async (force = false) => {
+    if (svcCatalogLoaded && !force) return;
+    setSvcCatalogLoading(true);
+    setSvcCatalogError('');
+    try {
+      await seedDefaultCatalogIfEmpty();
+      const [cats, items] = await Promise.all([listServiceCategories(), listServiceCatalogItems()]);
+      setSvcCategories(cats);
+      setSvcCatalog(items);
+      if (cats.length === 0) {
+        setSvcCatalogError('无法加载服务目录，请检查 Supabase 是否已建表（运行 SERVICE_QUOTE_SETUP_SQL）以及网络连接。Could not load the service catalog — check that the Supabase tables exist (run SERVICE_QUOTE_SETUP_SQL) and that the network connection is working.');
+      }
+    } catch (e: any) {
+      setSvcCatalogError(`加载失败 Failed to load: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setSvcCatalogLoading(false);
+      setSvcCatalogLoaded(true);
+    }
   };
 
   const svcLoadQuoteList = async () => {
