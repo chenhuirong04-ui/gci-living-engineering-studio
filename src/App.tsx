@@ -83,6 +83,12 @@ import {
   saveSupplierQuote, listSupplierQuotes, loadSupplierQuote, markSupplierQuoteConverted,
   deleteSupplierQuote, generateSupplierQuoteNo, SupplierQuote, SupplierQuoteItem,
 } from './lib/supplierQuoteCloud';
+import {
+  listServiceCategories, listServiceCatalogItems, addServiceCategory, addServiceCatalogItem,
+  deleteServiceCatalogItem, seedDefaultCatalogIfEmpty, saveServiceQuote, listServiceQuotes,
+  loadServiceQuote, deleteServiceQuote, generateServiceQuoteNo, BILLING_TYPE_LABELS, PAYMENT_TERM_OPTIONS,
+  ServiceCategory, ServiceCatalogItem, ServiceQuote, ServiceQuoteItem, ServiceBillingType,
+} from './lib/serviceQuoteCloud';
 import { 
   BedSize, 
   SIZE_DIMENSIONS,
@@ -277,7 +283,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<'configurator' | 'history'>('configurator');
   // Top-level app mode — controls homepage entry point
-  const [appMode, setAppMode] = useState<'landing' | 'customer-quote' | 'supplier-quote' | 'package-quote'>('landing');
+  const [appMode, setAppMode] = useState<'landing' | 'customer-quote' | 'supplier-quote' | 'package-quote' | 'service-quote'>('landing');
   // Supplier Quote metadata form
   const [supplierMeta, setSupplierMeta] = useState({
     supplierName: '', supplierContact: '', category: '', currency: 'AED',
@@ -322,6 +328,32 @@ export default function App() {
     deliveryTime: false, packaging: false, remarks: false, moq: false, paymentTerms: false,
   });
   const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
+
+  // ── Module 4: Service Quote — fully standalone, no link to inventory/SKU/supplier cost ──
+  const [svcView, setSvcView] = useState<'list' | 'editor' | 'catalog'>('list');
+  const [svcCategories, setSvcCategories] = useState<ServiceCategory[]>([]);
+  const [svcCatalog, setSvcCatalog] = useState<ServiceCatalogItem[]>([]);
+  const [svcCatalogLoaded, setSvcCatalogLoaded] = useState(false);
+  const [svcQuotes, setSvcQuotes] = useState<ServiceQuote[]>([]);
+  const [svcSavedId, setSvcSavedId] = useState<string | null>(null);
+  const [svcSaveStatus, setSvcSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [svcMeta, setSvcMeta] = useState({
+    quoteNo: generateServiceQuoteNo(),
+    customerName: '', contactPerson: '',
+    quoteDate: new Date().toISOString().split('T')[0],
+    currency: 'AED', projectDuration: '', paymentTerms: PAYMENT_TERM_OPTIONS[0], notes: '',
+  });
+  type SvcLineItem = {
+    id: string; categoryName: string; serviceName: string; description: string;
+    unit: string; quantity: number; unitPrice: number; billingType: ServiceBillingType;
+    billingLabel: string; lineTotal: number; totalOverridden: boolean;
+  };
+  const [svcItems, setSvcItems] = useState<SvcLineItem[]>([]);
+  const [svcShowPicker, setSvcShowPicker] = useState(false);
+  const [svcPickerSearch, setSvcPickerSearch] = useState('');
+  const [svcNewCatName, setSvcNewCatName] = useState({ cn: '', en: '' });
+  const [svcNewItem, setSvcNewItem] = useState({ categoryId: '', cn: '', en: '', unit: '项', billing: 'fixed' as ServiceBillingType });
+
   // Cloud save state
   const [cloudId, setCloudId] = useState<string | null>(null);
   const [cloudSaveStatus, setCloudSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -1556,6 +1588,326 @@ export default function App() {
     }
 
     doc.save(`GCI-Package-Quote-${meta.quoteNo}.pdf`);
+  };
+
+  // ── Module 4: Service Quote — render ──────────────────────────────────────────
+  const renderServiceQuoteModule = () => {
+    const catalogByCategory = svcCategories.map(cat => ({
+      cat,
+      items: svcCatalog.filter(it => it.category_id === cat.id &&
+        (!svcPickerSearch.trim() ||
+          it.name_cn.includes(svcPickerSearch) ||
+          it.name_en.toLowerCase().includes(svcPickerSearch.toLowerCase()))),
+    })).filter(g => g.items.length > 0 || !svcPickerSearch.trim());
+
+    // ── List view: saved Service Quotes ───────────────────────────────────────
+    if (svcView === 'list') {
+      return (
+        <div className="space-y-8 animate-in fade-in duration-500">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Service Quotes 服务报价</h2>
+              <p className="text-[11px] text-[#0C1B3A]/50 mt-1">企业服务 · 出海服务 · 项目服务 · 海外仓 · 供应链 · AI数字化（与库存/SKU/成本无关）</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { svcLoadCatalog(); setSvcView('catalog'); }}
+                className="px-5 py-3 rounded-[16px] text-[11px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+                Manage Catalog
+              </button>
+              <button
+                onClick={() => {
+                  svcLoadCatalog();
+                  setSvcMeta({ quoteNo: generateServiceQuoteNo(), customerName: '', contactPerson: '', quoteDate: new Date().toISOString().split('T')[0], currency: 'AED', projectDuration: '', paymentTerms: PAYMENT_TERM_OPTIONS[0], notes: '' });
+                  setSvcItems([]); setSvcSavedId(null); setSvcSaveStatus('idle');
+                  setSvcView('editor');
+                }}
+                className="px-6 py-3 rounded-[16px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg"
+                style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}
+              >
+                <Plus className="w-4 h-4" /> New Service Quote
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+            {svcQuotes.length === 0 ? (
+              <div className="p-16 text-center text-[#0C1B3A]/30 text-[12px]">
+                No service quotes yet. Click "New Service Quote" to start. 暂无服务报价，点击上方按钮新建。
+              </div>
+            ) : (
+              <div className="divide-y divide-[#0C1B3A]/6">
+                {svcQuotes.map(sq => (
+                  <div key={sq.id} className="flex items-center justify-between px-6 py-4 hover:bg-[#0C1B3A]/2 transition-colors">
+                    <div>
+                      <p className="text-[13px] font-black text-[#0C1B3A]">{sq.quote_no} · {sq.customer_name}</p>
+                      <p className="text-[11px] text-[#0C1B3A]/40 mt-0.5">{sq.quote_date} · {sq.currency} {sq.total_amount.toFixed(2)} · <span className="uppercase font-bold">{sq.status}</span></p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleOpenServiceQuote(sq, false)} className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">Open</button>
+                      <button onClick={() => handleOpenServiceQuote(sq, true)} className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">Duplicate</button>
+                      <button onClick={() => sq.id && handleDeleteServiceQuote(sq.id)} className="px-3 py-2 rounded-xl text-[#0C1B3A]/20 hover:text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Catalog Manager view — add categories/services without touching code ───
+    if (svcView === 'catalog') {
+      return (
+        <div className="space-y-8 animate-in fade-in duration-500">
+          <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
+            <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
+          </button>
+          <div>
+            <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Service Catalog Manager</h2>
+            <p className="text-[11px] text-[#0C1B3A]/50 mt-1">新增服务分类/项目，无需修改代码 — Add categories/services here, no developer needed for future additions.</p>
+          </div>
+
+          {/* Add category */}
+          <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 p-6 space-y-3">
+            <h4 className="text-[12px] font-black text-[#0C1B3A]">Add Category 新增分类</h4>
+            <div className="flex gap-3">
+              <input value={svcNewCatName.cn} onChange={e => setSvcNewCatName(p => ({ ...p, cn: e.target.value }))} placeholder="中文名称" className="flex-1 bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+              <input value={svcNewCatName.en} onChange={e => setSvcNewCatName(p => ({ ...p, en: e.target.value }))} placeholder="English Name" className="flex-1 bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+              <button
+                onClick={async () => {
+                  if (!svcNewCatName.cn.trim() || !svcNewCatName.en.trim()) return;
+                  await addServiceCategory({ name_cn: svcNewCatName.cn, name_en: svcNewCatName.en, sort_order: svcCategories.length });
+                  setSvcNewCatName({ cn: '', en: '' });
+                  const cats = await listServiceCategories(); setSvcCategories(cats);
+                }}
+                className="px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider shrink-0"
+                style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Add catalog item */}
+          <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 p-6 space-y-3">
+            <h4 className="text-[12px] font-black text-[#0C1B3A]">Add Service 新增服务项目</h4>
+            <div className="grid grid-cols-5 gap-3">
+              <select value={svcNewItem.categoryId} onChange={e => setSvcNewItem(p => ({ ...p, categoryId: e.target.value }))} className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2.5 text-[12px] outline-none focus:border-[#C9A84C]">
+                <option value="">Category 分类</option>
+                {svcCategories.map(c => <option key={c.id} value={c.id}>{c.name_cn}</option>)}
+              </select>
+              <input value={svcNewItem.cn} onChange={e => setSvcNewItem(p => ({ ...p, cn: e.target.value }))} placeholder="中文名称" className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2.5 text-[12px] outline-none focus:border-[#C9A84C]" />
+              <input value={svcNewItem.en} onChange={e => setSvcNewItem(p => ({ ...p, en: e.target.value }))} placeholder="English Name" className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2.5 text-[12px] outline-none focus:border-[#C9A84C]" />
+              <input value={svcNewItem.unit} onChange={e => setSvcNewItem(p => ({ ...p, unit: e.target.value }))} placeholder="Unit 单位" className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2.5 text-[12px] outline-none focus:border-[#C9A84C]" />
+              <select value={svcNewItem.billing} onChange={e => setSvcNewItem(p => ({ ...p, billing: e.target.value as ServiceBillingType }))} className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-3 py-2.5 text-[11px] outline-none focus:border-[#C9A84C]">
+                {Object.entries(BILLING_TYPE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={async () => {
+                if (!svcNewItem.categoryId || !svcNewItem.cn.trim() || !svcNewItem.en.trim()) { alert('请填写分类、中文名称、英文名称'); return; }
+                await addServiceCatalogItem({ category_id: svcNewItem.categoryId, name_cn: svcNewItem.cn, name_en: svcNewItem.en, default_unit: svcNewItem.unit || '项', default_billing_type: svcNewItem.billing, sort_order: svcCatalog.length, active: true });
+                setSvcNewItem({ categoryId: svcNewItem.categoryId, cn: '', en: '', unit: '项', billing: 'fixed' });
+                const items = await listServiceCatalogItems(); setSvcCatalog(items);
+              }}
+              className="px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider"
+              style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}
+            >
+              Add Service
+            </button>
+          </div>
+
+          {/* Existing catalog */}
+          <div className="bg-white rounded-[20px] border border-[#0C1B3A]/8 overflow-hidden">
+            {svcCategories.map(cat => (
+              <div key={cat.id} className="border-b border-[#0C1B3A]/6 last:border-b-0">
+                <div className="px-6 py-3 bg-[#0C1B3A]/3">
+                  <p className="text-[11px] font-black text-[#0C1B3A]">{cat.name_cn} / {cat.name_en}</p>
+                </div>
+                {svcCatalog.filter(it => it.category_id === cat.id).map(it => (
+                  <div key={it.id} className="flex items-center justify-between px-6 py-2.5 hover:bg-[#0C1B3A]/2">
+                    <p className="text-[12px] text-[#0C1B3A]/80">{it.name_cn} / {it.name_en} <span className="text-[#0C1B3A]/30">· {it.default_unit} · {BILLING_TYPE_LABELS[it.default_billing_type]}</span></p>
+                    <button
+                      onClick={async () => { if (it.id) { await deleteServiceCatalogItem(it.id); const items = await listServiceCatalogItems(); setSvcCatalog(items); } }}
+                      className="text-[#0C1B3A]/20 hover:text-red-400 transition-colors"
+                    ><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Editor view ─────────────────────────────────────────────────────────────
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500">
+        <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
+          <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
+        </button>
+
+        <div className="flex items-center gap-3">
+          <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Service Quote</span>
+          <h2 className="text-2xl font-serif italic text-[#0C1B3A]">{svcMeta.quoteNo}</h2>
+        </div>
+
+        {/* Quote meta */}
+        <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 p-6 grid grid-cols-3 gap-5">
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Customer Name 客户名称</label>
+            <input value={svcMeta.customerName} onChange={e => setSvcMeta(p => ({ ...p, customerName: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]" />
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Contact Person 联系人</label>
+            <input value={svcMeta.contactPerson} onChange={e => setSvcMeta(p => ({ ...p, contactPerson: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Quote Date 日期</label>
+            <input type="date" value={svcMeta.quoteDate} onChange={e => setSvcMeta(p => ({ ...p, quoteDate: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]" />
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Currency 币种</label>
+            <select value={svcMeta.currency} onChange={e => setSvcMeta(p => ({ ...p, currency: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] font-bold outline-none focus:border-[#C9A84C]">
+              {['AED','USD','CNY'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Project Duration 项目周期</label>
+            <input value={svcMeta.projectDuration} onChange={e => setSvcMeta(p => ({ ...p, projectDuration: e.target.value }))} placeholder="e.g. 3 months / 长期" className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] placeholder:text-[#0C1B3A]/20" />
+          </div>
+          <div>
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Payment Terms 付款方式</label>
+            <select value={svcMeta.paymentTerms} onChange={e => setSvcMeta(p => ({ ...p, paymentTerms: e.target.value }))} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C]">
+              {PAYMENT_TERM_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="col-span-3">
+            <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Notes 备注</label>
+            <textarea value={svcMeta.notes} onChange={e => setSvcMeta(p => ({ ...p, notes: e.target.value }))} rows={2} className="w-full bg-[#0C1B3A]/3 border border-[#0C1B3A]/10 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:border-[#C9A84C] resize-none" />
+          </div>
+        </div>
+
+        {/* Items */}
+        <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
+          <div className="px-6 py-4 flex items-center justify-between border-b border-[#0C1B3A]/8">
+            <h4 className="text-[13px] font-black text-[#0C1B3A]">Service Items 服务项目</h4>
+            <button onClick={() => { svcLoadCatalog(); setSvcShowPicker(true); }} className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C] hover:text-[#0C1B3A] transition-colors flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Add Service
+            </button>
+          </div>
+
+          {svcShowPicker && (
+            <div className="px-6 py-4 bg-[#0C1B3A]/3 border-b border-[#0C1B3A]/8 space-y-3">
+              <div className="flex items-center gap-3">
+                <input value={svcPickerSearch} onChange={e => setSvcPickerSearch(e.target.value)} placeholder="Search services... 搜索服务" className="flex-1 bg-white border border-[#0C1B3A]/10 rounded-xl px-4 py-2 text-[12px] outline-none focus:border-[#C9A84C]" />
+                <button onClick={svcAddCustomItem} className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] whitespace-nowrap">+ Custom Service</button>
+                <button onClick={() => setSvcShowPicker(false)} className="text-[#0C1B3A]/30 hover:text-[#0C1B3A]"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-3">
+                {catalogByCategory.map(({ cat, items }) => (
+                  <div key={cat.id}>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 mb-1">{cat.name_cn} / {cat.name_en}</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {items.map(it => (
+                        <button key={it.id} onClick={() => svcAddItemFromCatalog(it)} className="text-left px-3 py-2 rounded-lg bg-white border border-[#0C1B3A]/6 hover:border-[#C9A84C] text-[11.5px] text-[#0C1B3A]/80 transition-colors">
+                          {it.name_cn} / {it.name_en}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="divide-y divide-[#0C1B3A]/6">
+            {svcItems.length === 0 ? (
+              <div className="p-12 text-center text-[#0C1B3A]/30 text-[12px]">No services added yet. 还没有添加服务项目。</div>
+            ) : svcItems.map(item => (
+              <div key={item.id} className="px-6 py-4 space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <input value={item.serviceName} onChange={e => svcUpdateItem(item.id, { serviceName: e.target.value })}
+                      className="w-full text-[13px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
+                    <p className="text-[9px] text-[#0C1B3A]/30 mt-1">{item.categoryName}</p>
+                  </div>
+                  <button onClick={() => setSvcItems(prev => prev.filter(it => it.id !== item.id))} className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors shrink-0">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <input value={item.description} onChange={e => svcUpdateItem(item.id, { description: e.target.value })} placeholder="Service description / 服务描述" className="w-full text-[11.5px] text-[#0C1B3A]/60 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 placeholder:text-[#0C1B3A]/20" />
+                <div className="grid grid-cols-6 gap-2 items-end">
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Billing 计费方式</label>
+                    <select value={item.billingType} onChange={e => svcUpdateItem(item.id, { billingType: e.target.value as ServiceBillingType })} className="w-full text-[10.5px] bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]">
+                      {Object.entries(BILLING_TYPE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                    </select>
+                  </div>
+                  {item.billingType === 'custom' && (
+                    <div>
+                      <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Custom Label</label>
+                      <input value={item.billingLabel} onChange={e => svcUpdateItem(item.id, { billingLabel: e.target.value })} className="w-full text-[10.5px] bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Unit</label>
+                    <input value={item.unit} onChange={e => svcUpdateItem(item.id, { unit: e.target.value })} className="w-full text-[10.5px] text-center bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Qty</label>
+                    <input type="number" min="0" value={item.quantity} onChange={e => svcUpdateItem(item.id, { quantity: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-center bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Unit Price</label>
+                    <input type="number" min="0" step="0.01" value={item.unitPrice} onChange={e => svcUpdateItem(item.id, { unitPrice: Number(e.target.value) || 0 })} className="w-full text-[10.5px] font-mono text-right bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Line Total {item.totalOverridden && <span className="text-[#C9A84C]">✎</span>}</label>
+                    <input type="number" step="0.01" value={item.lineTotal} onChange={e => svcUpdateItem(item.id, { lineTotal: Number(e.target.value) || 0, totalOverridden: true })} className="w-full text-[11px] font-mono font-black text-right bg-[#C9A84C]/8 border border-[#C9A84C]/30 rounded-lg px-2 py-1.5 outline-none focus:border-[#C9A84C]" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="px-6 py-5 bg-[#0C1B3A]/3 border-t border-[#0C1B3A]/8 flex items-center justify-between">
+            <p className="text-[10px] text-[#0C1B3A]/35">{svcItems.length} service{svcItems.length === 1 ? '' : 's'}</p>
+            <div className="text-right">
+              <p className="text-[10px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total 总金额</p>
+              <p className="text-2xl font-black font-mono text-[#0C1B3A]">{svcMeta.currency} {svcGrandTotal().toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => handleSaveServiceQuote('Draft')} disabled={svcSaveStatus === 'saving'}
+            className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+            {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Draft 保存草稿'}
+          </button>
+          <button onClick={() => handleSaveServiceQuote('Final')} disabled={svcSaveStatus === 'saving'}
+            className="py-4 rounded-[18px] text-[12px] font-black uppercase tracking-widest shadow-lg"
+            style={{ backgroundColor: '#0C1B3A', color: '#C9A84C' }}>
+            {svcSaveStatus === 'saving' ? 'Saving...' : 'Save Final 保存正式报价'}
+          </button>
+        </div>
+        {svcSaveStatus === 'saved' && (
+          <div className="grid grid-cols-3 gap-3 animate-in fade-in duration-300">
+            <button onClick={generateServiceQuotePdf} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all flex items-center justify-center gap-2">
+              <FileText className="w-4 h-4" /> Download PDF
+            </button>
+            <button onClick={handleSendServiceQuoteToDeal} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest border border-[#0C1B3A]/15 text-[#0C1B3A]/60 hover:border-[#C9A84C] hover:text-[#0C1B3A] transition-all">
+              Send to DEAL
+            </button>
+            <button onClick={handleSendServiceQuoteToTrade} className="py-4 rounded-[18px] text-[11px] font-black uppercase tracking-widest" style={{ backgroundColor: '#C9A84C', color: '#0C1B3A' }}>
+              Send to TRADE
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderPackageQuote = () => {
@@ -3218,6 +3570,284 @@ export default function App() {
     doc.text('This is a system-generated document from GCI Quotation Center.', w / 2, 287, { align: 'center' });
 
     doc.save(`GCI-Trade-Quote-${quoteInfo.quoteNumber || quoteInfo.customerProjectName || 'Draft'}.pdf`);
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Module 4: Service Quote — standalone service-quotation engine.
+  // No link to inventory/SKU/supplier cost/BOQ/margin calculation/stock deduction.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  const svcComputeLineTotal = (qty: number, unitPrice: number, billing: ServiceBillingType, overridden: boolean, current: number) => {
+    if (overridden) return current; // percentage/commission/custom often need a manual total
+    return Number((qty * unitPrice).toFixed(2));
+  };
+
+  const svcUpdateItem = (id: string, patch: Partial<SvcLineItem>) => {
+    setSvcItems(prev => prev.map(it => {
+      if (it.id !== id) return it;
+      const next = { ...it, ...patch };
+      if (!('lineTotal' in patch)) {
+        next.lineTotal = svcComputeLineTotal(next.quantity, next.unitPrice, next.billingType, next.totalOverridden, next.lineTotal);
+      }
+      return next;
+    }));
+  };
+
+  const svcAddItemFromCatalog = (cat: ServiceCatalogItem) => {
+    const category = svcCategories.find(c => c.id === cat.category_id);
+    setSvcItems(prev => [...prev, {
+      id: `svc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      categoryName: category ? `${category.name_cn} / ${category.name_en}` : '',
+      serviceName: `${cat.name_cn} / ${cat.name_en}`,
+      description: '', unit: cat.default_unit, quantity: 1, unitPrice: 0,
+      billingType: cat.default_billing_type, billingLabel: '', lineTotal: 0, totalOverridden: false,
+    }]);
+    setSvcShowPicker(false);
+  };
+
+  const svcAddCustomItem = () => {
+    setSvcItems(prev => [...prev, {
+      id: `svc-custom-${Date.now()}`,
+      categoryName: '自定义 Custom', serviceName: 'New Service / 新服务项目',
+      description: '', unit: '项', quantity: 1, unitPrice: 0,
+      billingType: 'fixed', billingLabel: '', lineTotal: 0, totalOverridden: false,
+    }]);
+    setSvcShowPicker(false);
+  };
+
+  const svcGrandTotal = () => svcItems.reduce((s, it) => s + it.lineTotal, 0);
+
+  const svcLoadCatalog = async () => {
+    if (svcCatalogLoaded) return;
+    await seedDefaultCatalogIfEmpty().catch(() => {});
+    const [cats, items] = await Promise.all([listServiceCategories(), listServiceCatalogItems()]);
+    setSvcCategories(cats);
+    setSvcCatalog(items);
+    setSvcCatalogLoaded(true);
+  };
+
+  const svcLoadQuoteList = async () => {
+    const qs = await listServiceQuotes(60);
+    setSvcQuotes(qs);
+  };
+
+  const handleSaveServiceQuote = async (status: 'Draft' | 'Final') => {
+    if (!svcMeta.customerName.trim()) { alert('请填写客户名称 Please enter customer name'); return; }
+    setSvcSaveStatus('saving');
+    try {
+      const quote: ServiceQuote = {
+        quote_no: svcMeta.quoteNo, customer_name: svcMeta.customerName, contact_person: svcMeta.contactPerson,
+        quote_date: svcMeta.quoteDate, currency: svcMeta.currency, project_duration: svcMeta.projectDuration,
+        payment_terms: svcMeta.paymentTerms, notes: svcMeta.notes, status,
+        total_amount: Number(svcGrandTotal().toFixed(2)),
+      };
+      const items: ServiceQuoteItem[] = svcItems.map((it, i) => ({
+        category_name: it.categoryName, service_name: it.serviceName, description: it.description,
+        unit: it.unit, quantity: it.quantity, unit_price: it.unitPrice, billing_type: it.billingType,
+        billing_label: it.billingLabel, line_total: it.lineTotal, sort_order: i,
+      }));
+      const id = await saveServiceQuote(quote, items);
+      if (id) { setSvcSavedId(id); setSvcSaveStatus('saved'); svcLoadQuoteList(); }
+      else { setSvcSaveStatus('error'); alert('❌ 保存失败 Save failed. Run SERVICE_QUOTE_SETUP_SQL in Supabase first if tables don\'t exist yet.'); }
+    } catch (e: any) {
+      setSvcSaveStatus('error');
+      alert(`❌ Save failed: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleOpenServiceQuote = async (sq: ServiceQuote, duplicate: boolean) => {
+    if (!sq.id) return;
+    const result = await loadServiceQuote(sq.id);
+    if (!result) { alert('Failed to load service quote'); return; }
+    const { quote, items } = result;
+    setSvcMeta({
+      quoteNo: duplicate ? generateServiceQuoteNo() : quote.quote_no,
+      customerName: quote.customer_name, contactPerson: quote.contact_person || '',
+      quoteDate: duplicate ? new Date().toISOString().split('T')[0] : (quote.quote_date || ''),
+      currency: quote.currency, projectDuration: quote.project_duration || '',
+      paymentTerms: quote.payment_terms || PAYMENT_TERM_OPTIONS[0], notes: quote.notes || '',
+    });
+    setSvcItems(items.map((it, i) => ({
+      id: `svc-${duplicate ? 'dup' : 'load'}-${Date.now()}-${i}`,
+      categoryName: it.category_name || '', serviceName: it.service_name, description: it.description || '',
+      unit: it.unit, quantity: it.quantity, unitPrice: it.unit_price, billingType: it.billing_type,
+      billingLabel: it.billing_label || '', lineTotal: it.line_total, totalOverridden: true,
+    })));
+    setSvcSavedId(duplicate ? null : (sq.id || null));
+    setSvcSaveStatus(duplicate ? 'idle' : 'saved');
+    setSvcView('editor');
+  };
+
+  const handleDeleteServiceQuote = async (id: string) => {
+    if (!confirm('删除此服务报价？ Delete this service quote?')) return;
+    await deleteServiceQuote(id);
+    svcLoadQuoteList();
+  };
+
+  /** Service Quote PDF — fully independent generator, GCI Living navy+gold style. */
+  const generateServiceQuotePdf = () => {
+    const doc = new jsPDF();
+    const navy: [number, number, number] = [12, 27, 58];
+    const gold: [number, number, number] = [201, 168, 76];
+    const w = 210, margin = 15;
+    let y = 20;
+
+    doc.setFillColor(...navy);
+    doc.rect(0, 0, w, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text('GLOBALCARE INFO GENERAL TRADING FZCO', margin, 12);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...gold);
+    doc.text('TEL: +971585566809  |  EMAIL: CHRIS@GLOBALCAREINFO.COM  |  DUBAI, UAE', margin, 20);
+    y = 38;
+
+    doc.setFillColor(...gold);
+    doc.rect(margin, y, w - margin * 2, 8, 'F');
+    doc.setTextColor(...navy);
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text('SERVICE QUOTATION / 服务报价单', w / 2, y + 5.5, { align: 'center' });
+    y += 14;
+
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50);
+    const leftCol = [
+      ['Quote No:', svcMeta.quoteNo],
+      ['Customer:', svcMeta.customerName || '—'],
+      ['Contact:', svcMeta.contactPerson || '—'],
+    ];
+    const rightCol = [
+      ['Date:', svcMeta.quoteDate],
+      ['Currency:', svcMeta.currency],
+      ['Project Duration:', svcMeta.projectDuration || '—'],
+    ];
+    leftCol.forEach(([label, val], i) => {
+      doc.setFont('helvetica', 'bold'); doc.text(label, margin, y + i * 6);
+      doc.setFont('helvetica', 'normal'); doc.text(String(val), margin + 30, y + i * 6);
+    });
+    rightCol.forEach(([label, val], i) => {
+      doc.setFont('helvetica', 'bold'); doc.text(label, 120, y + i * 6);
+      doc.setFont('helvetica', 'normal'); doc.text(String(val), 155, y + i * 6);
+    });
+    y += 24;
+
+    const colWidths = [70, 30, 16, 12, 24, 28];
+    const colX = [margin, margin + 70, margin + 100, margin + 116, margin + 128, margin + 152];
+    const headers = ['Service / 服务项目', 'Billing / 计费方式', 'Unit', 'Qty', 'Unit Price', 'Total'];
+    doc.setFillColor(...navy);
+    doc.rect(margin, y, w - margin * 2, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
+    headers.forEach((h, i) => doc.text(h, colX[i] + (i >= 3 ? colWidths[i] - 2 : 1), y + 5, { align: i >= 3 ? 'right' : 'left' }));
+    y += 9;
+
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
+    svcItems.forEach(item => {
+      if (y > 255) { doc.addPage(); y = 20; }
+      doc.setFontSize(8);
+      const descText = item.serviceName + (item.description ? `\n${item.description}` : '');
+      const nameLines = doc.splitTextToSize(descText, colWidths[0] - 2);
+      doc.text(nameLines, colX[0] + 1, y + 4);
+      const billingText = item.billingType === 'custom' && item.billingLabel ? item.billingLabel : BILLING_TYPE_LABELS[item.billingType];
+      doc.text(doc.splitTextToSize(billingText, colWidths[1] - 2), colX[1] + 1, y + 4);
+      doc.text(item.unit, colX[2] + colWidths[2] - 2, y + 4, { align: 'right' });
+      doc.text(String(item.quantity), colX[3] + colWidths[3] - 2, y + 4, { align: 'right' });
+      doc.text(item.unitPrice.toFixed(2), colX[4] + colWidths[4] - 2, y + 4, { align: 'right' });
+      doc.text(item.lineTotal.toFixed(2), colX[5] + colWidths[5] - 2, y + 4, { align: 'right' });
+      const rowH = Math.max(8, nameLines.length * 4 + 3);
+      doc.setDrawColor(220, 220, 220);
+      doc.line(margin, y + rowH, w - margin, y + rowH);
+      y += rowH;
+    });
+    y += 6;
+
+    doc.setFillColor(...navy);
+    doc.rect(125, y, w - margin - 125, 8, 'F');
+    doc.setTextColor(...gold);
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+    doc.text('TOTAL:', 127, y + 5.5);
+    doc.text(`${svcMeta.currency} ${svcGrandTotal().toFixed(2)}`, w - margin, y + 5.5, { align: 'right' });
+    y += 16;
+
+    if (svcMeta.paymentTerms) {
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...navy);
+      doc.text('Payment Terms / 付款方式:', margin, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50);
+      doc.text(svcMeta.paymentTerms, margin + 55, y);
+      y += 10;
+    }
+
+    if (svcMeta.notes) {
+      if (y > 240) { doc.addPage(); y = 20; }
+      doc.setFillColor(...navy);
+      doc.rect(margin, y, w - margin * 2, 7, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+      doc.text('NOTES / 备注', margin + 2, y + 5);
+      y += 10;
+      doc.setTextColor(40, 40, 40); doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
+      doc.splitTextToSize(svcMeta.notes, w - margin * 2 - 4).forEach((line: string) => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(line, margin + 2, y); y += 5;
+      });
+    }
+
+    doc.setTextColor(160, 160, 160);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+    doc.text('This is a system-generated document from GCI Quotation Center.', w / 2, 287, { align: 'center' });
+
+    doc.save(`GCI-Service-Quote-${svcMeta.quoteNo}.pdf`);
+  };
+
+  /** Send to TRADE — same inbound payload pattern already used by Trade & Sourcing. */
+  const handleSendServiceQuoteToTrade = () => {
+    if (!svcMeta.customerName.trim()) { alert('请填写客户名称 Please enter customer name'); return; }
+    const payload = {
+      customerName: svcMeta.customerName,
+      projectName: svcMeta.customerName,
+      quoteNo: svcMeta.quoteNo,
+      quoteDate: svcMeta.quoteDate,
+      currency: svcMeta.currency,
+      subtotal: Number(svcGrandTotal().toFixed(2)),
+      vatAmount: 0,
+      totalAmount: Number(svcGrandTotal().toFixed(2)),
+      items: svcItems.map(it => ({
+        desc: it.serviceName + (it.description ? ` (${it.description})` : ''),
+        qty: it.quantity,
+        unitPrice: it.unitPrice,
+        lineTotal: it.lineTotal,
+      })),
+      sourceApp: 'gci-living-engineering-studio',
+      piType: 'SERVICE',
+      notes: svcMeta.notes || undefined,
+    };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    window.open(`https://trade.globalcareinfo.com/?inbound=${encoded}&tab=quote`, '_blank');
+  };
+
+  /**
+   * Send to DEAL — best-effort only. Unlike TRADE, this app does not have a documented
+   * "push data into DEAL" endpoint; DEAL only pushes INTO this app (client/project/businessId
+   * params) and exposes a `returnUrl` for navigating back. If DEAL opened this tab with a
+   * returnUrl, we forward there with a quote summary attached as a query param; otherwise we
+   * copy a summary to the clipboard so the user can paste it into DEAL manually. This is a
+   * stopgap until a real DEAL inbound contract is confirmed — flagged in the chat summary.
+   */
+  const handleSendServiceQuoteToDeal = async () => {
+    const summary = {
+      quoteNo: svcMeta.quoteNo, customerName: svcMeta.customerName, currency: svcMeta.currency,
+      totalAmount: Number(svcGrandTotal().toFixed(2)), itemCount: svcItems.length,
+    };
+    if (_returnUrlParam) {
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(summary))));
+      const sep = _returnUrlParam.includes('?') ? '&' : '?';
+      window.location.href = `${_returnUrlParam}${sep}serviceQuote=${encoded}`;
+    } else {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+        alert('未检测到 DEAL 回传地址，报价摘要已复制到剪贴板，请手动粘贴到 DEAL。\nNo DEAL returnUrl detected — quote summary copied to clipboard, please paste into DEAL manually.');
+      } catch {
+        alert(`请手动复制以下内容到 DEAL:\n${JSON.stringify(summary)}`);
+      }
+    }
   };
 
   const t = (key: string) => {
@@ -8338,7 +8968,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
                   <h2 className="text-4xl font-serif italic text-[#0C1B3A]">GCI Supply Chain Center</h2>
                   <p className="text-[12px] font-bold uppercase tracking-[0.4em] text-[#C9A84C]">Choose your workflow</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
                   {/* 1: Customer Quote */}
                   <button onClick={() => setAppMode('customer-quote')}
                     className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
@@ -8389,12 +9019,31 @@ Leave a field as empty string if not present. Never fabricate values.`;
                     </p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Import Packages →</p>
                   </button>
+
+                  {/* 4: Service Quote — NEW */}
+                  <button onClick={() => { setAppMode('service-quote'); setSvcView('list'); svcLoadQuoteList(); }}
+                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Services</span>
+                      <Briefcase className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Service Quote</h3>
+                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">服务报价</p>
+                    </div>
+                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                      Corporate services, market entry, project coordination, overseas warehouse, supply chain, AI solutions. 企业服务/出海/项目/海外仓/供应链/AI数字化（不涉及库存与成本）。
+                    </p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Build Quote →</p>
+                  </button>
                 </div>
               </div>
             ) : appMode === 'supplier-quote' && view !== 'history' ? (
               renderSupplierQuoteUpload()
             ) : appMode === 'package-quote' && view !== 'history' ? (
               renderPackageQuote()
+            ) : appMode === 'service-quote' ? (
+              renderServiceQuoteModule()
             ) : (
 
             /* ── Customer Quote flow + History (existing) ──────────── */
