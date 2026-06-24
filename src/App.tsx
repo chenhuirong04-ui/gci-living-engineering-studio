@@ -1611,10 +1611,32 @@ export default function App() {
       setSvcView('category');
     };
 
+    // Breadcrumb — same structure/style as Package Quote's "Workflow Home › Package Quote › ..."
+    const SvcBreadcrumb = ({ trail }: { trail?: string }) => (
+      <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest flex-wrap">
+        <button onClick={() => setAppMode('landing')} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">
+          Workflow Home
+        </button>
+        <span className="text-[#0C1B3A]/20">›</span>
+        {svcView === 'list' ? (
+          <span className="text-[#C9A84C]">Service Quote</span>
+        ) : (
+          <button onClick={() => setSvcView('list')} className="text-[#0C1B3A]/30 hover:text-[#C9A84C] transition-colors">Service Quote</button>
+        )}
+        {trail && (
+          <>
+            <span className="text-[#0C1B3A]/20">›</span>
+            <span className="text-[#C9A84C]">{trail}</span>
+          </>
+        )}
+      </div>
+    );
+
     // ── List view: saved Service Quotes ───────────────────────────────────────
     if (svcView === 'list') {
       return (
         <div className="space-y-8 animate-in fade-in duration-500">
+          <SvcBreadcrumb />
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Service Quotes 服务报价</h2>
@@ -1666,9 +1688,7 @@ export default function App() {
     if (svcView === 'category') {
       return (
         <div className="space-y-8 animate-in fade-in duration-500">
-          <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
-            <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
-          </button>
+          <SvcBreadcrumb trail="New Service Quote" />
           <div className="text-center space-y-2">
             <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Step 1 of 3</span>
             <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Choose a Service Category</h2>
@@ -1725,6 +1745,7 @@ export default function App() {
         (!svcPickerSearch.trim() || it.name_cn.includes(svcPickerSearch) || it.name_en.toLowerCase().includes(svcPickerSearch.toLowerCase())));
       return (
         <div className="space-y-6 animate-in fade-in duration-500 pb-24">
+          <SvcBreadcrumb trail="New Service Quote" />
           <button onClick={() => setSvcView('category')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
             <ChevronLeft className="w-4 h-4" /> All Categories
           </button>
@@ -1791,9 +1812,7 @@ export default function App() {
     if (svcView === 'catalog') {
       return (
         <div className="space-y-8 animate-in fade-in duration-500">
-          <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
-            <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
-          </button>
+          <SvcBreadcrumb trail="Catalog Manager" />
           <div>
             <h2 className="text-2xl font-serif italic text-[#0C1B3A]">Service Catalog Manager</h2>
             <p className="text-[11px] text-[#0C1B3A]/50 mt-1">新增服务分类/项目，无需修改代码 — Add categories/services here, no developer needed for future additions.</p>
@@ -1924,9 +1943,7 @@ export default function App() {
 
     return (
       <div className="space-y-6 animate-in fade-in duration-500">
-        <button onClick={() => setSvcView('list')} className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-[#0C1B3A]/40 hover:text-[#C9A84C] transition-colors">
-          <ChevronLeft className="w-4 h-4" /> Back to Service Quotes
-        </button>
+        <SvcBreadcrumb trail={svcMeta.quoteNo} />
 
         <div className="flex items-center gap-3">
           <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-3 py-1 rounded-full">Step 3 of 3</span>
