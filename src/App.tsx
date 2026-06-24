@@ -211,6 +211,17 @@ interface DraftItem {
   originalUnitCost?: number;
   originalCurrency?: string;
   originalTotal?: number;
+  // ── Module 2 V2: rich supplier detail fields ──────────────────────────
+  model?: string;
+  material?: string;
+  color?: string;
+  moq?: string;
+  packaging?: string;
+  deliveryTime?: string;
+  paymentTerms?: string;
+  remarks?: string;
+  englishDescription?: string; // editable EN translation, shown in customer quote
+  marginPercent?: number;      // per-item margin override (defaults to global margin)
 }
 
 // ── Package Quote (Project → Package → Items) ────────────────────────────────
@@ -297,6 +308,10 @@ export default function App() {
   const [showCurrencyModal, setShowCurrencyModal] = useState(false);
   const [pendingConversionItems, setPendingConversionItems] = useState<DraftItem[]>([]);
   const [rateConfig, setRateConfig] = useState<{ quoteCurrency: string; rate: number }>({ quoteCurrency: 'AED', rate: 1 });
+  // Module 2 V2: live currency/margin preview shown directly in Supplier Cost Items table
+  const [sqCustomerCurrency, setSqCustomerCurrency] = useState<'AED' | 'USD'>('AED');
+  const [sqExchangeRate, setSqExchangeRate] = useState<number>(0.505); // Supplier currency → Customer currency
+  const [sqGlobalMargin, setSqGlobalMargin] = useState<number>(30);    // default margin %, per-item overridable
   const [pdfDownloaded, setPdfDownloaded] = useState(false); // PDF download indicator
   // Cloud save state
   const [cloudId, setCloudId] = useState<string | null>(null);
@@ -2363,58 +2378,146 @@ export default function App() {
               <p className="text-[11px] text-[#0C1B3A]/50 mt-0.5">Review and correct before saving · {draftItems.length} items</p>
             </div>
           </div>
-          {/* Editable table — same structure as Trade & Sourcing */}
+          {/* Currency / Exchange Rate / Margin controls — live preview, applies to every row below */}
+          <div className="bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-[20px] px-6 py-4 flex flex-wrap items-end gap-5">
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Supplier Currency</label>
+              <select value={supplierMeta.currency} onChange={e => setSupplierMeta(prev => ({ ...prev, currency: e.target.value }))}
+                className="bg-white border border-[#0C1B3A]/10 rounded-lg px-3 py-2 text-[13px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C]">
+                {['CNY','USD','AED'].map(c => <option key={c} value={c}>{c === 'CNY' ? 'RMB (CNY)' : c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Exchange Rate →</label>
+              <input type="number" step="0.0001" min="0" value={sqExchangeRate}
+                onChange={e => setSqExchangeRate(Number(e.target.value) || 0)}
+                className="w-28 bg-white border border-[#0C1B3A]/10 rounded-lg px-3 py-2 text-[13px] font-mono font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C]" />
+            </div>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Customer Currency</label>
+              <select value={sqCustomerCurrency} onChange={e => setSqCustomerCurrency(e.target.value as 'AED' | 'USD')}
+                className="bg-white border border-[#0C1B3A]/10 rounded-lg px-3 py-2 text-[13px] font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C]">
+                {['AED','USD'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] font-black uppercase tracking-widest text-[#0C1B3A]/40 block mb-1.5">Default Margin %</label>
+              <input type="number" step="1" min="0" value={sqGlobalMargin}
+                onChange={e => setSqGlobalMargin(Number(e.target.value) || 0)}
+                className="w-24 bg-white border border-[#0C1B3A]/10 rounded-lg px-3 py-2 text-[13px] font-mono font-bold text-[#0C1B3A] outline-none focus:border-[#C9A84C]" />
+            </div>
+            <p className="text-[10px] text-[#0C1B3A]/35 leading-snug max-w-[220px]">Converted = Supplier Cost × Rate. Customer Price = Converted × (1 + Margin%). Margin can be overridden per item below.</p>
+          </div>
+
+          {/* Editable table — rich detail + EN translation + currency conversion */}
           <div className="bg-white rounded-[24px] border border-[#0C1B3A]/8 overflow-hidden shadow-sm">
             <div className="grid grid-cols-12 gap-3 px-6 py-3 bg-[#0C1B3A] text-white text-[10px] font-black uppercase tracking-wider">
               <div className="col-span-1 text-center">GCI</div>
-              <div className="col-span-3">Item Name</div>
+              <div className="col-span-3">Item</div>
               <div className="col-span-2">Spec</div>
               <div className="col-span-1 text-center">Qty</div>
               <div className="col-span-1 text-center">Unit</div>
-              <div className="col-span-2 text-right">Unit Cost</div>
-              <div className="col-span-2 text-right">Total</div>
+              <div className="col-span-2 text-right">Supplier Cost</div>
+              <div className="col-span-2 text-right">Customer Total</div>
             </div>
             <div className="divide-y divide-[#0C1B3A]/6">
               {draftItems.map((item, idx) => {
                 const included = item.includeInGCI !== false;
+                const marginPct = item.marginPercent ?? sqGlobalMargin;
+                const convertedUnitCost = item.targetUnitPrice * sqExchangeRate;
+                const customerUnitPrice = convertedUnitCost * (1 + marginPct / 100);
+                const customerLineTotal = customerUnitPrice * item.quantity;
+                const update = (patch: Partial<DraftItem>) =>
+                  setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it));
                 return (
-                <div key={item.id} className={`grid grid-cols-12 gap-3 px-6 py-3 items-center group transition-opacity ${included ? '' : 'opacity-40'}`}>
-                  <div className="col-span-1 flex justify-center">
-                    <input type="checkbox" checked={included}
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, includeInGCI: e.target.checked } : it))}
-                      className="w-4 h-4 accent-[#C9A84C] cursor-pointer" />
+                <div key={item.id} className={`px-6 py-4 group transition-opacity space-y-3 ${included ? '' : 'opacity-40'}`}>
+                  {/* Row 1: core fields */}
+                  <div className="grid grid-cols-12 gap-3 items-center">
+                    <div className="col-span-1 flex justify-center">
+                      <input type="checkbox" checked={included}
+                        onChange={e => update({ includeInGCI: e.target.checked })}
+                        className="w-4 h-4 accent-[#C9A84C] cursor-pointer" />
+                    </div>
+                    <div className="col-span-3">
+                      <input value={item.originalName}
+                        onChange={e => update({ originalName: e.target.value })}
+                        placeholder="Original Description"
+                        className="w-full text-[14px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1 transition-colors" />
+                    </div>
+                    <div className="col-span-2">
+                      <input value={item.originalSpec || ''} placeholder="Spec / size"
+                        onChange={e => update({ originalSpec: e.target.value })}
+                        className="w-full text-[13px] text-[#0C1B3A]/55 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 transition-colors placeholder:text-[#0C1B3A]/20" />
+                    </div>
+                    <div className="col-span-1">
+                      <input type="number" min="0" value={item.quantity}
+                        onChange={e => update({ quantity: Number(e.target.value) || 1, targetTotal: (Number(e.target.value) || 1) * item.targetUnitPrice })}
+                        className="w-full text-[14px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
+                    </div>
+                    <div className="col-span-1">
+                      <input value={item.unit}
+                        onChange={e => update({ unit: e.target.value })}
+                        className="w-full text-[13px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1" />
+                    </div>
+                    <div className="col-span-2 text-right">
+                      <input type="number" min="0" step="0.01" value={item.targetUnitPrice ? Number(item.targetUnitPrice.toFixed(2)) : ''} placeholder="0.00"
+                        onChange={e => update({ targetUnitPrice: Number(e.target.value) || 0, targetTotal: (Number(e.target.value) || 0) * item.quantity })}
+                        className="w-full text-right text-[14px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
+                      <p className="text-[9px] text-[#0C1B3A]/30 text-right mt-0.5">{supplierMeta.currency}/{item.unit}</p>
+                    </div>
+                    <div className="col-span-2 text-right flex items-start justify-end gap-2">
+                      <div>
+                        <p className="text-[14px] font-black font-mono text-[#0C1B3A]">{sqCustomerCurrency} {customerLineTotal.toFixed(2)}</p>
+                        <p className="text-[9px] text-[#0C1B3A]/30">@ {customerUnitPrice.toFixed(2)} / {item.unit}</p>
+                      </div>
+                      <button onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="col-span-3">
-                    <input value={item.originalName}
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalName: e.target.value } : it))}
-                      className="w-full text-[14px] font-bold text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1 transition-colors" />
+
+                  {/* Row 2: English Description (editable, used on customer quote) */}
+                  <div className="pl-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-[#C9A84C] block mb-1">English Description</label>
+                    <textarea value={item.englishDescription || ''} rows={2} placeholder="Professional English description for customer quote"
+                      onChange={e => update({ englishDescription: e.target.value })}
+                      className="w-full text-[12.5px] text-[#0C1B3A]/85 bg-[#0C1B3A]/3 border border-[#0C1B3A]/8 rounded-lg p-2 resize-none outline-none focus:border-[#C9A84C] transition-colors" />
                   </div>
-                  <div className="col-span-2">
-                    <input value={item.originalSpec || ''} placeholder="—"
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, originalSpec: e.target.value } : it))}
-                      className="w-full text-[13px] text-[#0C1B3A]/55 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1 transition-colors placeholder:text-[#0C1B3A]/20" />
+
+                  {/* Row 3: extra supplier detail fields */}
+                  <div className="grid grid-cols-6 gap-2 pl-1">
+                    {([
+                      ['model','Model'],['material','Material'],['color','Color'],
+                      ['moq','MOQ'],['packaging','Packaging'],['deliveryTime','Delivery'],
+                    ] as [keyof DraftItem, string][]).map(([key, label]) => (
+                      <div key={key}>
+                        <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">{label}</label>
+                        <input value={(item[key] as string) || ''} placeholder="—"
+                          onChange={e => update({ [key]: e.target.value } as Partial<DraftItem>)}
+                          className="w-full text-[11px] text-[#0C1B3A]/70 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-0.5 placeholder:text-[#0C1B3A]/15" />
+                      </div>
+                    ))}
                   </div>
-                  <div className="col-span-1">
-                    <input type="number" min="0" value={item.quantity}
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: Number(e.target.value)||1, targetTotal: (Number(e.target.value)||1) * it.targetUnitPrice } : it))}
-                      className="w-full text-[14px] font-mono font-bold text-[#0C1B3A] text-center bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
-                  </div>
-                  <div className="col-span-1">
-                    <input value={item.unit}
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, unit: e.target.value } : it))}
-                      className="w-full text-[13px] text-[#0C1B3A]/60 text-center bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-1" />
-                  </div>
-                  <div className="col-span-2 text-right">
-                    <input type="number" min="0" step="0.01" value={item.targetUnitPrice ? Number(item.targetUnitPrice.toFixed(2)) : ''} placeholder="0.00"
-                      onChange={e => setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, targetUnitPrice: Number(e.target.value)||0, targetTotal: (Number(e.target.value)||0) * it.quantity } : it))}
-                      className="w-full text-right text-[14px] font-mono font-black text-[#0C1B3A] bg-transparent border-b-2 border-[#0C1B3A]/10 focus:border-[#C9A84C] outline-none pb-1" />
-                  </div>
-                  <div className="col-span-2 text-right flex items-center justify-end gap-2">
-                    <p className="text-[14px] font-black font-mono text-[#0C1B3A]">{(item.targetUnitPrice * item.quantity).toFixed(2)}</p>
-                    <button onClick={() => setDraftItems(prev => prev.filter((_, i) => i !== idx))}
-                      className="text-[#0C1B3A]/15 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="grid grid-cols-3 gap-2 pl-1">
+                    <div>
+                      <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Payment Terms</label>
+                      <input value={item.paymentTerms || ''} placeholder="—"
+                        onChange={e => update({ paymentTerms: e.target.value })}
+                        className="w-full text-[11px] text-[#0C1B3A]/70 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-0.5 placeholder:text-[#0C1B3A]/15" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Remarks</label>
+                      <input value={item.remarks || ''} placeholder="—"
+                        onChange={e => update({ remarks: e.target.value })}
+                        className="w-full text-[11px] text-[#0C1B3A]/70 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-0.5 placeholder:text-[#0C1B3A]/15" />
+                    </div>
+                    <div>
+                      <label className="text-[8px] font-black uppercase tracking-widest text-[#0C1B3A]/30 block mb-1">Margin % (override)</label>
+                      <input type="number" step="1" value={item.marginPercent ?? ''} placeholder={`${sqGlobalMargin} (default)`}
+                        onChange={e => update({ marginPercent: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        className="w-full text-[11px] font-mono text-[#0C1B3A]/70 bg-transparent border-b border-[#0C1B3A]/8 focus:border-[#C9A84C] outline-none pb-0.5 placeholder:text-[#0C1B3A]/20" />
+                    </div>
                   </div>
                 </div>
                 );
@@ -2426,9 +2529,15 @@ export default function App() {
                 <Plus className="w-4 h-4" /> Add Item
               </button>
               <div className="text-right">
-                <p className="text-[11px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Total Cost</p>
-                <p className="text-2xl font-black font-mono text-[#0C1B3A]">
+                <p className="text-[11px] font-bold uppercase text-[#0C1B3A]/30 tracking-wider">Supplier Total / Customer Total</p>
+                <p className="text-[13px] font-mono text-[#0C1B3A]/50">
                   {supplierMeta.currency} {draftItems.reduce((s, it) => s + it.targetUnitPrice * it.quantity, 0).toFixed(2)}
+                </p>
+                <p className="text-2xl font-black font-mono text-[#0C1B3A]">
+                  {sqCustomerCurrency} {draftItems.reduce((s, it) => {
+                    const margin = it.marginPercent ?? sqGlobalMargin;
+                    return s + it.targetUnitPrice * sqExchangeRate * (1 + margin / 100) * it.quantity;
+                  }, 0).toFixed(2)}
                 </p>
               </div>
             </div>
@@ -2474,10 +2583,9 @@ export default function App() {
                   const included = draftItems.filter(it => it.includeInGCI !== false);
                   if (included.length === 0) { alert('Please select at least one item to create GCI Quote.'); return; }
                   // Gate: show currency & exchange rate confirmation before entering Pricing Review
-                  const supplierCur = supplierMeta.currency || 'AED';
-                  const defaultRate = DEFAULT_RATES[supplierCur]?.['AED'] ?? 1;
+                  // Pre-fill from the live preview controls set above (Supplier Currency / Exchange Rate / Customer Currency)
                   setPendingConversionItems(included);
-                  setRateConfig({ quoteCurrency: 'AED', rate: defaultRate });
+                  setRateConfig({ quoteCurrency: sqCustomerCurrency, rate: sqExchangeRate });
                   setShowCurrencyModal(true);
                 }}
                 disabled={!savedSQId}
@@ -2531,6 +2639,8 @@ export default function App() {
         status: 'Active',
         total_cost: Number(totalCost.toFixed(2)),
       };
+      // Pack Module 2 V2 rich fields into `notes` as JSON (no Supabase schema change needed) —
+      // prefixed so handleCreateGCIQuoteFromSupplier can detect and parse it back on reload.
       const items: SupplierQuoteItem[] = draftItems.map((it, i) => ({
         item_name: it.originalName,
         description: it.originalSpec || '',
@@ -2538,7 +2648,13 @@ export default function App() {
         unit: it.unit,
         supplier_cost: it.originalUnitCost ?? it.targetUnitPrice,
         currency: it.originalCurrency || supplierMeta.currency || 'AED',
-        notes: tradeItemNotes[it.id] || '',
+        notes: 'GCI_V2::' + JSON.stringify({
+          en: it.englishDescription || '', model: it.model || '', material: it.material || '',
+          color: it.color || '', moq: it.moq || '', packaging: it.packaging || '',
+          delivery: it.deliveryTime || '', payment: it.paymentTerms || '',
+          remarks: it.remarks || '', margin: it.marginPercent ?? null,
+          note: tradeItemNotes[it.id] || '',
+        }),
         sort_order: i,
       }));
       const id = await saveSupplierQuote(header, items);
@@ -2567,25 +2683,40 @@ export default function App() {
     if (!result) { alert('Failed to load supplier quote'); return; }
 
     const { items } = result;
-    // Restore draftItems from supplier quote items
-    const restoredDraft = items.map(it => ({
-      id: `sq-${it.id || Date.now()}-${Math.random().toString(36).slice(2)}`,
-      originalName: it.item_name,
-      originalSpec: it.description || '',
-      quantity: it.qty,
-      unit: it.unit,
-      targetUnitPrice: it.supplier_cost,
-      targetTotal: it.supplier_cost * it.qty,
-      confidence: 1,
-      status: 'Confirmed' as const,
-      suggestedCategory: FurnitureCategory.OTHER,
-    }));
+    // Restore draftItems from supplier quote items — unpack Module 2 V2 rich fields from `notes` if present
+    const restoredDraft = items.map(it => {
+      let v2: any = {};
+      if (it.notes?.startsWith('GCI_V2::')) {
+        try { v2 = JSON.parse(it.notes.slice('GCI_V2::'.length)); } catch { /* ignore malformed */ }
+      }
+      return {
+        id: `sq-${it.id || Date.now()}-${Math.random().toString(36).slice(2)}`,
+        originalName: it.item_name,
+        originalSpec: it.description || '',
+        quantity: it.qty,
+        unit: it.unit,
+        targetUnitPrice: it.supplier_cost,
+        targetTotal: it.supplier_cost * it.qty,
+        confidence: 1,
+        status: 'Confirmed' as const,
+        suggestedCategory: FurnitureCategory.OTHER,
+        englishDescription: v2.en || '', model: v2.model || '', material: v2.material || '',
+        color: v2.color || '', moq: v2.moq || '', packaging: v2.packaging || '',
+        deliveryTime: v2.delivery || '', paymentTerms: v2.payment || '',
+        remarks: v2.remarks || '', marginPercent: v2.margin ?? undefined,
+      };
+    });
 
     const newCurrencies: Record<string, string> = {};
     const newNotes: Record<string, string> = {};
     restoredDraft.forEach((d, i) => {
       newCurrencies[d.id] = items[i]?.currency || 'AED';
-      newNotes[d.id] = items[i]?.notes || '';
+      const raw = items[i]?.notes || '';
+      if (raw.startsWith('GCI_V2::')) {
+        try { newNotes[d.id] = JSON.parse(raw.slice(8)).note || ''; } catch { newNotes[d.id] = ''; }
+      } else {
+        newNotes[d.id] = raw;
+      }
     });
 
     setDraftItems(restoredDraft);
@@ -3793,12 +3924,29 @@ export default function App() {
 
       const ai = new GoogleGenAI({ apiKey });
 
-      const prompt = `Analyze this supplier quote PDF. Separate into:
-1. PRODUCT ITEMS with quantity and price (return in "items" array).
+      const prompt = `Analyze this supplier quote PDF (it may be in Chinese or English). Separate into:
+1. PRODUCT ITEMS — read every detail available for each item, including any text visible in embedded images (model numbers, dimensions, material callouts).
 2. TERMS such as payment, lead time, validity, remarks (return in "terms" string).
 
+For each item, also produce a professional English description (do not translate word-for-word — write it the way it would appear on a formal quotation), while keeping the original supplier text untouched.
+
 Return ONLY valid JSON:
-{"items":[{"originalName":"name","originalSpec":"spec","quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0}],"terms":"..."}`;
+{"items":[{
+  "originalName":"name as written by supplier (keep Chinese if Chinese)",
+  "englishDescription":"professional English description of the item",
+  "originalSpec":"size/spec/dimensions",
+  "model":"model or SKU number if any",
+  "material":"material description",
+  "color":"color if mentioned",
+  "quantity":1,"unit":"pc","targetUnitPrice":0,"targetTotal":0,
+  "originalCurrency":"currency code if visible e.g. RMB/USD/AED",
+  "moq":"minimum order quantity if mentioned",
+  "packaging":"packaging method if mentioned",
+  "deliveryTime":"lead/delivery time if mentioned",
+  "paymentTerms":"payment terms if mentioned",
+  "remarks":"any other notes for this item"
+}],"terms":"..."}
+Leave a field as empty string if not present. Never fabricate values.`;
 
       // ── Step 4: Gemini call (25s timeout for China network) ──────────
       console.log('[PDF] Step 4 calling Gemini...');
@@ -3895,12 +4043,18 @@ Return ONLY valid JSON:
     });
     const newCurrencies: Record<string, string> = {};
     const newNotes: Record<string, string> = {};
-    converted.forEach(it => { newCurrencies[it.id] = quoteCurrency; newNotes[it.id] = it.notes || ''; });
+    const newMarkups: Record<string, number> = {};
+    converted.forEach(it => {
+      newCurrencies[it.id] = quoteCurrency;
+      newNotes[it.id] = it.notes || '';
+      // Carry over per-item margin set in Module 2's table (falls back to global default)
+      newMarkups[it.id] = it.marginPercent ?? sqGlobalMargin;
+    });
     setDraftItems(converted);
     setTradeItemCurrencies(newCurrencies);
     setTradeItemNotes(newNotes);
     setSellingPrices({});
-    setMarkupPercents({});
+    setMarkupPercents(newMarkups);
     setQuoteGenerated(false);
     setSentToTrade(false);
     setQuoteSource('supplier-archive');
@@ -4037,6 +4191,39 @@ Return ONLY valid JSON:
           }
           const dataRows = jsonData.slice(bestHeaderRowIndex !== -1 ? bestHeaderRowIndex + 1 : 1);
           console.log('[parseExcel] mappings:', mappings, '| autoMappings:', autoMappings, '| bestHeaderRowIndex:', bestHeaderRowIndex);
+
+          // Guard: if item column contains DISPIMG formulas, it's an image column — re-detect
+          {
+            const sample = dataRows.slice(0, 5).map((r: any) => String(r[autoMappings.item] || ''));
+            if (sample.some(v => v.includes('DISPIMG'))) {
+              const altItem = headers.findIndex((h: string, i: number) =>
+                i !== autoMappings.item && keywords.item.some(k => h === k || (h.length > 1 && h.includes(k)))
+              );
+              if (altItem !== -1) {
+                autoMappings.item = altItem;
+              } else {
+                // Fallback: scan all columns for one that has no DISPIMG
+                for (let ci = 0; ci < (dataRows[0] || []).length; ci++) {
+                  if (ci === autoMappings.item) continue;
+                  const colSample = dataRows.slice(0, 5).map((r: any) => String(r[ci] || ''));
+                  const hasText = colSample.some(v => v.trim() && !v.includes('DISPIMG') && !/^\d+$/.test(v.trim()));
+                  if (hasText) { autoMappings.item = ci; break; }
+                }
+              }
+            }
+          }
+
+          // Extra detail columns — best-effort, missing column just means empty field
+          const findColLocal = (kList: string[]) => headers.findIndex((h: string) => kList.some(k => h === k || (h.length > 1 && h.includes(k))));
+          const colModel   = findColLocal(['model','sku','型号','货号']);
+          const colMaterial= findColLocal(['material','材质','材料']);
+          const colColor   = findColLocal(['color','colour','颜色']);
+          const colMoq     = findColLocal(['moq','minimum order','起订量']);
+          const colPackaging = findColLocal(['packaging','package','包装']);
+          const colDelivery = findColLocal(['delivery','lead time','交期','交货']);
+          const colPayment  = findColLocal(['payment','付款']);
+          const colRemarks  = findColLocal(['remark','note','备注']);
+
           const TERM_KEYWORDS = ['payment','lead time','delivery time','validity','warranty','guarantee','remark','note','notes','condition','terms','incoterm'];
           const SKIP_ROW_WORDS = ['subtotal','grand total','合计','总计','小计','总价','合价','grand'];
           const NOTE_PREFIXES = ['注：','注:','备注','note:','note：','*','（注','(注'];
@@ -4063,10 +4250,25 @@ Return ONLY valid JSON:
             const unitPrice = parseFloat(String(row[autoMappings.price] || '0').replace(/[^0-9.-]/g, '')) || 0;
             const qty = parseFloat(String(row[autoMappings.qty] || '1').replace(/[^0-9.-]/g, '')) || 1;
             const supplierCurrencyAtParse = supplierMeta.currency || 'AED';
+            const rawSpec = String(row[autoMappings.spec] || '').trim();
+            const rawMaterial = colMaterial !== -1 ? String(row[colMaterial] || '').trim() : '';
+            // Best-effort EN description: translate name + material via Package Quote's CN→EN helpers as a starting point (user can edit)
+            const enName = pqTranslate(name);
+            const enMaterial = rawMaterial ? materialToEn(rawMaterial) : '';
+            const englishDescription = [enName, enMaterial].filter(Boolean).join(' — ');
             rows.push({
               id: `sq-xl-${Date.now()}-${idx}`,
               originalName: name,
-              originalSpec: String(row[autoMappings.spec] || '').trim(),
+              englishDescription,
+              originalSpec: rawSpec,
+              model:    colModel    !== -1 ? String(row[colModel] || '').trim()    : '',
+              material: rawMaterial,
+              color:    colColor    !== -1 ? String(row[colColor] || '').trim()    : '',
+              moq:        colMoq        !== -1 ? String(row[colMoq] || '').trim()        : '',
+              packaging:  colPackaging  !== -1 ? String(row[colPackaging] || '').trim()  : '',
+              deliveryTime: colDelivery !== -1 ? String(row[colDelivery] || '').trim()   : '',
+              paymentTerms: colPayment  !== -1 ? String(row[colPayment] || '').trim()    : '',
+              remarks:    colRemarks    !== -1 ? String(row[colRemarks] || '').trim()    : '',
               quantity: qty,
               unit: 'pc',
               targetUnitPrice: unitPrice,
@@ -4182,11 +4384,12 @@ Return ONLY valid JSON:
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
       
       const prompt = `
-        Analyze this supplier quote / requirement list image.
+        Analyze this supplier quote / requirement image. It may be a WeChat screenshot, phone photo, Excel screenshot, or scanned PDF page, in Chinese or English.
+        Read every detail visible, including small print, model numbers, and text inside photos of the products themselves.
         Separate the content into TWO categories:
 
         1. PRODUCT ITEMS: Real products or services with quantities and prices.
-        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions.
+        2. TERMS: Any non-product content such as payment terms, lead time, delivery time, validity, warranty, remarks, notes, conditions, supplier name/contact.
 
         Do NOT include the following as product items (put them in terms instead):
         - Payment / Payment terms
@@ -4194,23 +4397,36 @@ Return ONLY valid JSON:
         - Validity / Offer validity
         - Warranty / Guarantee
         - Remarks / Notes / Comments
+        - Supplier name / contact info
         - Any row that has no quantity or no price and is clearly a condition or remark
+
+        For each item, also write a professional English description (not a literal translation — phrase it the way it would read on a formal quotation) while keeping the supplier's original text untouched.
 
         Return ONLY valid JSON in this exact format:
         {
           "items": [
             {
-              "originalName": "Item name",
-              "originalSpec": "Size/Spec/Description",
+              "originalName": "Item name as written by supplier (keep Chinese if Chinese)",
+              "englishDescription": "Professional English description",
+              "originalSpec": "Size/Spec/Description/dimensions",
+              "model": "Model or SKU number if any",
+              "material": "Material description if mentioned",
+              "color": "Color if mentioned",
               "quantity": 1,
               "unit": "pc",
               "targetUnitPrice": 0,
-              "targetTotal": 0
+              "targetTotal": 0,
+              "originalCurrency": "Currency code if visible e.g. RMB/USD/AED",
+              "moq": "Minimum order quantity if mentioned",
+              "packaging": "Packaging method if mentioned",
+              "deliveryTime": "Lead/delivery time if mentioned",
+              "paymentTerms": "Payment terms if mentioned",
+              "remarks": "Any other notes for this item"
             }
           ],
           "terms": "Payment: ... | Lead time: ... | Notes: ..."
         }
-        If no terms found, set terms to "". If no items found, set items to [].
+        Leave a field as empty string if not present — never fabricate values. If no terms found, set terms to "". If no items found, set items to [].
       `;
 
       const response = await ai.models.generateContent({
@@ -4264,6 +4480,8 @@ Return ONLY valid JSON:
         - Remarks / Notes / Comments
         - Any line that has no quantity or no price and is clearly a condition or remark
 
+        For each item, also write a professional English description (not a literal translation) while keeping the original supplier text untouched.
+
         Input Text:
         ${importText}
 
@@ -4271,17 +4489,27 @@ Return ONLY valid JSON:
         {
           "items": [
             {
-              "originalName": "Item name",
+              "originalName": "Item name as written by supplier (keep Chinese if Chinese)",
+              "englishDescription": "Professional English description",
               "originalSpec": "Size/Spec/Description",
+              "model": "Model or SKU number if any",
+              "material": "Material description if mentioned",
+              "color": "Color if mentioned",
               "quantity": 1,
               "unit": "pc",
               "targetUnitPrice": 0,
-              "targetTotal": 0
+              "targetTotal": 0,
+              "originalCurrency": "Currency code if visible e.g. RMB/USD/AED",
+              "moq": "Minimum order quantity if mentioned",
+              "packaging": "Packaging method if mentioned",
+              "deliveryTime": "Lead/delivery time if mentioned",
+              "paymentTerms": "Payment terms if mentioned",
+              "remarks": "Any other notes for this item"
             }
           ],
           "terms": "Payment: ... | Lead time: ... | Notes: ..."
         }
-        If no terms found, set terms to "". If no items found, set items to [].
+        Leave a field as empty string if not present. If no terms found, set terms to "". If no items found, set items to [].
       `;
 
       const response = await withTimeout(
@@ -4388,8 +4616,11 @@ Return ONLY valid JSON:
 
       const mappedItems: DraftItem[] = items.map((it, idx) => {
         const res = aiResults[idx] || {};
+        const englishDescription = it.englishDescription?.trim()
+          || [pqTranslate(it.originalName || ''), it.material ? materialToEn(it.material) : ''].filter(Boolean).join(' — ');
         return {
           ...it,
+          englishDescription,
           suggestedCategory: categoryMap[res.category as string] || 'unknown',
           confidence: res.confidence || 0.5,
           isSplittable: res.isSplittable || false,
@@ -4404,6 +4635,7 @@ Return ONLY valid JSON:
       // Fallback: load items without AI mapping
       setDraftItems(items.map(it => ({
         ...it,
+        englishDescription: it.englishDescription?.trim() || pqTranslate(it.originalName || ''),
         suggestedCategory: 'unknown',
         confidence: 0,
         status: 'Need Review'
