@@ -18,6 +18,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@gci/design-system": [
+        "./packages/design-system/src"
+      ],
+      "@gci/i18n": [
+        "./packages/i18n/src"
       ]
     },
     "allowImportingTsExtensions": true,
