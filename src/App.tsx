@@ -9177,7 +9177,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
                   {/* 1: Customer Quote */}
                   <button onClick={() => setAppMode('customer-quote')}
-                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border rounded-[18px] shadow-sm hover:border-[#CBA85C] hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex flex-col gap-4" style={{ borderColor: '#080D1E14' }}>
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">For Clients</span>
                       <FileText className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
@@ -9194,7 +9194,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
 
                   {/* 2: Supplier Quote */}
                   <button onClick={() => { setAppMode('supplier-quote'); setDraftItems([]); setTradeTerms(''); setSqSaveStatus('idle'); }}
-                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border rounded-[18px] shadow-sm hover:border-[#CBA85C] hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex flex-col gap-4" style={{ borderColor: '#080D1E14' }}>
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">Archive</span>
                       <Archive className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
@@ -9211,7 +9211,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
 
                   {/* 3: Package Quote — NEW */}
                   <button onClick={() => { setAppMode('package-quote'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
-                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border rounded-[18px] shadow-sm hover:border-[#CBA85C] hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex flex-col gap-4" style={{ borderColor: '#080D1E14' }}>
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">FF&E · Hotel · Apt</span>
                       <Layers className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
@@ -9228,7 +9228,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
 
                   {/* 4: Service Quote — NEW */}
                   <button onClick={() => { setAppMode('service-quote'); setSvcView('list'); svcLoadQuoteList(); }}
-                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border rounded-[18px] shadow-sm hover:border-[#CBA85C] hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex flex-col gap-4" style={{ borderColor: '#080D1E14' }}>
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">Services</span>
                       <Briefcase className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
