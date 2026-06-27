@@ -64,11 +64,11 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
 
     {/* Header */}
     <div className="text-center space-y-2">
-      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-[#C9A84C]">
+      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-[#CBA85C]" style={{ fontFamily: "'IBM Plex Mono',monospace" }}>
         {projectName}
       </p>
-      <h2 className="text-3xl font-serif italic text-[#0C1B3A]">Choose Quote Type</h2>
-      <p className="text-xs text-[#0C1B3A]/50 font-medium">
+      <h2 className="text-3xl font-semibold" style={{ fontFamily: "'Space Grotesk',sans-serif", color: '#080D1E' }}>Choose Quote Type</h2>
+      <p className="text-xs text-[#080D1E]/50 font-medium">
         Select the path that matches your current task · 选择对应业务路径
       </p>
     </div>
@@ -81,38 +81,38 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
           <button
             key={card.type}
             onClick={() => onSelect(card.type)}
-            className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-400 flex flex-col gap-5"
+            className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-400 flex flex-col gap-5"
           >
             {/* Tag + Icon */}
             <div className="flex items-center justify-between">
-              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">
+              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">
                 {card.tag}
               </span>
-              <div className="w-10 h-10 rounded-2xl bg-[#0C1B3A]/5 group-hover:bg-[#C9A84C]/10 flex items-center justify-center transition-colors">
-                <Icon className="w-5 h-5 text-[#0C1B3A]/40 group-hover:text-[#C9A84C] transition-colors" />
+              <div className="w-10 h-10 rounded-2xl bg-[#080D1E]/5 group-hover:bg-[#CBA85C]/10 flex items-center justify-center transition-colors">
+                <Icon className="w-5 h-5 text-[#080D1E]/40 group-hover:text-[#CBA85C] transition-colors" />
               </div>
             </div>
 
             {/* Title */}
             <div>
-              <h3 className="text-base font-black text-[#0C1B3A] leading-tight group-hover:text-[#C9A84C] transition-colors">
+              <h3 className="text-base font-semibold text-[#080D1E] leading-tight group-hover:text-[#CBA85C] transition-colors" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>
                 {card.title}
               </h3>
-              <p className="text-[10px] text-[#0C1B3A]/40 font-bold mt-0.5">{card.titleZh}</p>
+              <p className="text-[10px] text-[#080D1E]/40 font-bold mt-0.5">{card.titleZh}</p>
             </div>
 
             {/* Description */}
-            <p className="text-[11px] text-[#0C1B3A]/60 leading-relaxed flex-1">
+            <p className="text-[11px] text-[#080D1E]/60 leading-relaxed flex-1">
               {card.description}
               <br />
-              <span className="text-[#0C1B3A]/35">{card.descriptionZh}</span>
+              <span className="text-[#080D1E]/35">{card.descriptionZh}</span>
             </p>
 
             {/* Flow steps */}
             <div className="space-y-1 mt-1">
               {card.flow.map((step, i) => (
-                <div key={i} className="flex items-center gap-2 text-[9px] text-[#0C1B3A]/40">
-                  <span className="w-3.5 h-3.5 rounded-full bg-[#0C1B3A]/8 flex items-center justify-center font-black text-[7px] shrink-0">{i + 1}</span>
+                <div key={i} className="flex items-center gap-2 text-[9px] text-[#080D1E]/40">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#080D1E]/8 flex items-center justify-center font-black text-[7px] shrink-0">{i + 1}</span>
                   {step}
                 </div>
               ))}
@@ -121,17 +121,17 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
             {/* Examples */}
             <div className="flex flex-wrap gap-1.5">
               {card.examples.slice(0, 4).map(ex => (
-                <span key={ex} className="text-[8px] font-bold text-[#0C1B3A]/40 bg-[#0C1B3A]/4 px-2 py-0.5 rounded-full">
+                <span key={ex} className="text-[8px] font-bold text-[#080D1E]/40 bg-[#080D1E]/4 px-2 py-0.5 rounded-full">
                   {ex}
                 </span>
               ))}
               {card.examples.length > 4 && (
-                <span className="text-[8px] font-bold text-[#0C1B3A]/30 px-1">+{card.examples.length - 4}</span>
+                <span className="text-[8px] font-bold text-[#080D1E]/30 px-1">+{card.examples.length - 4}</span>
               )}
             </div>
 
             {/* CTA */}
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-[#CBA85C] opacity-0 group-hover:opacity-100 transition-opacity">
               Select → 进入
             </div>
           </button>
@@ -143,7 +143,7 @@ export const TypeSelection: React.FC<TypeSelectionProps> = ({ onSelect, onBack, 
     <div className="flex justify-center pt-2">
       <button
         onClick={onBack}
-        className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]/30 hover:text-[#0C1B3A] transition-colors flex items-center gap-2"
+        className="text-[10px] font-black uppercase tracking-widest text-[#080D1E]/30 hover:text-[#080D1E] transition-colors flex items-center gap-2"
       >
         ← Back to Project Info
       </button>

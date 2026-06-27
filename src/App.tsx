@@ -9171,76 +9171,76 @@ Leave a field as empty string if not present. Never fabricate values.`;
               /* ── Landing Page — 3 entry cards ──────────────────────── */
               <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
                 <div className="text-center space-y-3">
-                  <h2 className="text-4xl font-serif italic text-[#0C1B3A]">GCI Supply Chain Center</h2>
-                  <p className="text-[12px] font-bold uppercase tracking-[0.4em] text-[#C9A84C]">Choose your workflow</p>
+                  <h2 className="text-4xl font-semibold" style={{ fontFamily: "'Space Grotesk',sans-serif", color: '#080D1E' }}>GCI Supply Chain Center</h2>
+                  <p className="text-[12px] font-bold uppercase tracking-[0.4em] text-[#CBA85C]" style={{ fontFamily: "'IBM Plex Mono',monospace" }}>Choose your workflow</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
                   {/* 1: Customer Quote */}
                   <button onClick={() => setAppMode('customer-quote')}
-                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">For Clients</span>
-                      <FileText className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">For Clients</span>
+                      <FileText className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Custom Customer Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">定制客户报价</p>
+                      <h3 className="text-lg font-semibold text-[#080D1E] group-hover:text-[#CBA85C] transition-colors" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>Custom Customer Quote</h3>
+                      <p className="text-[11px] text-[#080D1E]/40 font-bold mt-0.5">定制客户报价</p>
                     </div>
-                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                    <p className="text-[12px] text-[#080D1E]/55 leading-relaxed flex-1">
                       For custom furniture, engineering BOQ, or manual item quotation. 用于家具定制、工程BOQ、手工录入报价。
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Start →</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#CBA85C] opacity-0 group-hover:opacity-100 transition-opacity">Start →</p>
                   </button>
 
                   {/* 2: Supplier Quote */}
                   <button onClick={() => { setAppMode('supplier-quote'); setDraftItems([]); setTradeTerms(''); setSqSaveStatus('idle'); }}
-                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Archive</span>
-                      <Archive className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">Archive</span>
+                      <Archive className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Supplier Quote to GCI Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">供应商报价转 GCI 报价</p>
+                      <h3 className="text-lg font-semibold text-[#080D1E] group-hover:text-[#CBA85C] transition-colors" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>Supplier Quote to GCI Quote</h3>
+                      <p className="text-[11px] text-[#080D1E]/40 font-bold mt-0.5">供应商报价转 GCI 报价</p>
                     </div>
-                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                    <p className="text-[12px] text-[#080D1E]/55 leading-relaxed flex-1">
                       Upload supplier Excel/PDF, extract cost items, add margin, and generate GCI customer quote. 上传供应商报价，读取成本，加价后生成 GCI 客户报价。
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Save to Archive →</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#CBA85C] opacity-0 group-hover:opacity-100 transition-opacity">Save to Archive →</p>
                   </button>
 
                   {/* 3: Package Quote — NEW */}
                   <button onClick={() => { setAppMode('package-quote'); setPqProject(null); setPqParseStatus('idle'); setPqParseError(''); }}
-                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">FF&E · Hotel · Apt</span>
-                      <Layers className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">FF&E · Hotel · Apt</span>
+                      <Layers className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Package Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">套餐报价</p>
+                      <h3 className="text-lg font-semibold text-[#080D1E] group-hover:text-[#CBA85C] transition-colors" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>Package Quote</h3>
+                      <p className="text-[11px] text-[#080D1E]/40 font-bold mt-0.5">套餐报价</p>
                     </div>
-                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                    <p className="text-[12px] text-[#080D1E]/55 leading-relaxed flex-1">
                       Import multi-sheet Excel as Project → Package → Items. For CoolHome, FF&E, Apartment, Hotel. 多 Sheet 套餐导入，适用于公寓/酒店项目。
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Import Packages →</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#CBA85C] opacity-0 group-hover:opacity-100 transition-opacity">Import Packages →</p>
                   </button>
 
                   {/* 4: Service Quote — NEW */}
                   <button onClick={() => { setAppMode('service-quote'); setSvcView('list'); svcLoadQuoteList(); }}
-                    className="group text-left p-8 bg-white border-2 border-[#0C1B3A]/8 rounded-[32px] hover:border-[#C9A84C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
+                    className="group text-left p-8 bg-white border-2 border-[#080D1E]/8 rounded-[32px] hover:border-[#CBA85C] hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-1 rounded-full">Services</span>
-                      <Briefcase className="w-6 h-6 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#CBA85C] bg-[#CBA85C]/10 px-2 py-1 rounded-full">Services</span>
+                      <Briefcase className="w-6 h-6 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-[#0C1B3A] group-hover:text-[#C9A84C] transition-colors">Service Quote</h3>
-                      <p className="text-[11px] text-[#0C1B3A]/40 font-bold mt-0.5">服务报价</p>
+                      <h3 className="text-lg font-semibold text-[#080D1E] group-hover:text-[#CBA85C] transition-colors" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>Service Quote</h3>
+                      <p className="text-[11px] text-[#080D1E]/40 font-bold mt-0.5">服务报价</p>
                     </div>
-                    <p className="text-[12px] text-[#0C1B3A]/55 leading-relaxed flex-1">
+                    <p className="text-[12px] text-[#080D1E]/55 leading-relaxed flex-1">
                       Corporate services, market entry, project coordination, overseas warehouse, supply chain, AI solutions. 企业服务/出海/项目/海外仓/供应链/AI数字化（不涉及库存与成本）。
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C] opacity-0 group-hover:opacity-100 transition-opacity">Build Quote →</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#CBA85C] opacity-0 group-hover:opacity-100 transition-opacity">Build Quote →</p>
                   </button>
                 </div>
               </div>
@@ -9258,18 +9258,18 @@ Leave a field as empty string if not present. Never fabricate values.`;
                 {/* Header + Tab Switcher */}
                 <div className="space-y-4">
                   <div className="text-center space-y-2">
-                    <h2 className="text-3xl font-serif italic text-brand-brown">History Center</h2>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-brand-gold">Supplier Quotes Archive · GCI Customer Quotes</p>
+                    <h2 className="text-3xl font-semibold" style={{ fontFamily: "'Space Grotesk',sans-serif", color: '#080D1E' }}>History Center</h2>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#CBA85C]" style={{ fontFamily: "'IBM Plex Mono',monospace" }}>Supplier Quotes Archive · GCI Customer Quotes</p>
                   </div>
                   {/* Tab switcher */}
                   <div className="flex justify-center">
-                    <div className="flex bg-[#0C1B3A]/5 p-1 rounded-2xl gap-1">
+                    <div className="flex bg-[#080D1E]/5 p-1 rounded-2xl gap-1">
                       <button
                         onClick={() => setHistoryTab('supplier')}
                         className="px-6 py-2.5 rounded-xl text-[12px] font-black uppercase tracking-wider transition-all"
                         style={historyTab === 'supplier'
-                          ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
-                          : { color: '#0C1B3A60' }}
+                          ? { backgroundColor: '#080D1E', color: '#CBA85C' }
+                          : { color: '#080D1E60' }}
                       >
                         Supplier Quotes
                       </button>
@@ -9277,8 +9277,8 @@ Leave a field as empty string if not present. Never fabricate values.`;
                         onClick={() => setHistoryTab('gci')}
                         className="px-6 py-2.5 rounded-xl text-[12px] font-black uppercase tracking-wider transition-all"
                         style={historyTab === 'gci'
-                          ? { backgroundColor: '#0C1B3A', color: '#C9A84C' }
-                          : { color: '#0C1B3A60' }}
+                          ? { backgroundColor: '#080D1E', color: '#CBA85C' }
+                          : { color: '#080D1E60' }}
                       >
                         GCI Quotes
                       </button>
@@ -9290,14 +9290,14 @@ Leave a field as empty string if not present. Never fabricate values.`;
                 {historyTab === 'supplier' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">Supplier Quote Archive</span>
-                      <div className="h-px flex-1 bg-[#0C1B3A]/10" />
-                      {supplierQuotesLoading && <RefreshCw className="w-3.5 h-3.5 text-[#C9A84C] animate-spin" />}
-                      <span className="text-[9px] text-[#0C1B3A]/30 font-bold uppercase">Cloud · Supabase</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-[#080D1E]">Supplier Quote Archive</span>
+                      <div className="h-px flex-1 bg-[#080D1E]/10" />
+                      {supplierQuotesLoading && <RefreshCw className="w-3.5 h-3.5 text-[#CBA85C] animate-spin" />}
+                      <span className="text-[9px] text-[#080D1E]/30 font-bold uppercase">Cloud · Supabase</span>
                     </div>
                     {!supplierQuotesLoading && supplierQuotes.length === 0 && (
-                      <div className="text-center py-12 border-2 border-dashed border-[#0C1B3A]/8 rounded-[28px] text-[#0C1B3A]/30">
-                        <p className="text-sm font-serif italic">No supplier quotes saved yet</p>
+                      <div className="text-center py-12 border-2 border-dashed border-[#080D1E]/8 rounded-[28px] text-[#080D1E]/30">
+                        <p className="text-sm" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>No supplier quotes saved yet</p>
                         <p className="text-[11px] mt-1">Upload a supplier quote → review costs → click "Save to Supplier Archive"</p>
                       </div>
                     )}
@@ -9306,26 +9306,26 @@ Leave a field as empty string if not present. Never fabricate values.`;
                         const statusColor = sq.status === 'Converted' ? 'bg-green-100 text-green-700'
                           : sq.status === 'Expired' ? 'bg-red-100 text-red-600'
                           : sq.status === 'Archived' ? 'bg-slate-100 text-slate-500'
-                          : 'bg-[#C9A84C]/15 text-[#A07C2D]';
+                          : 'bg-[#CBA85C]/15 text-[#A07C2D]';
                         return (
-                          <div key={sq.id} className="p-5 bg-white border border-[#0C1B3A]/8 rounded-[24px] flex items-center gap-5 hover:border-[#C9A84C]/40 transition-all group">
+                          <div key={sq.id} className="p-5 bg-white border border-[#080D1E]/8 rounded-[24px] flex items-center gap-5 hover:border-[#CBA85C]/40 transition-all group">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
                                 <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${statusColor}`}>{sq.status}</span>
-                                {sq.supplier_quote_no && <span className="text-[9px] font-mono text-[#0C1B3A]/40">{sq.supplier_quote_no}</span>}
+                                {sq.supplier_quote_no && <span className="text-[9px] font-mono text-[#080D1E]/40">{sq.supplier_quote_no}</span>}
                               </div>
-                              <h3 className="text-base font-black text-[#0C1B3A] truncate">{sq.supplier_name || '(Unnamed Supplier)'}</h3>
-                              <p className="text-[11px] text-[#0C1B3A]/40 mt-0.5">{sq.quote_date} · {sq.currency}</p>
-                              {sq.terms_notes && <p className="text-[10px] text-[#0C1B3A]/30 mt-0.5 truncate">{sq.terms_notes.slice(0, 60)}</p>}
+                              <h3 className="text-base font-black text-[#080D1E] truncate">{sq.supplier_name || '(Unnamed Supplier)'}</h3>
+                              <p className="text-[11px] text-[#080D1E]/40 mt-0.5">{sq.quote_date} · {sq.currency}</p>
+                              {sq.terms_notes && <p className="text-[10px] text-[#080D1E]/30 mt-0.5 truncate">{sq.terms_notes.slice(0, 60)}</p>}
                             </div>
                             <div className="text-right shrink-0">
-                              <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30">Total Cost</p>
-                              <p className="text-lg font-black font-mono text-[#0C1B3A]">{sq.currency} {(sq.total_cost || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+                              <p className="text-[9px] font-bold uppercase text-[#080D1E]/30">Total Cost</p>
+                              <p className="text-lg font-black font-mono text-[#080D1E]">{sq.currency} {(sq.total_cost || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
                             </div>
                             {sq.status !== 'Converted' && (
                               <button
                                 onClick={() => handleCreateGCIQuoteFromSupplier(sq)}
-                                className="shrink-0 px-4 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider border border-[#C9A84C]/30 text-[#C9A84C] bg-[#0C1B3A] hover:bg-[#0F2551] transition-all active:scale-95"
+                                className="shrink-0 px-4 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-wider border border-[#CBA85C]/30 text-[#CBA85C] bg-[#080D1E] hover:bg-[#0F2551] transition-all active:scale-95"
                               >
                                 Create GCI Quote
                               </button>
@@ -9364,26 +9364,26 @@ Leave a field as empty string if not present. Never fabricate values.`;
                 {/* ── Section 1: Cloud Trade/BOQ Quotes ───────────────── */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-[#0C1B3A]">Trade &amp; Sourcing · BOQ</span>
-                    <div className="h-px flex-1 bg-[#0C1B3A]/10" />
-                    {cloudHistoryLoading && <RefreshCw className="w-3.5 h-3.5 text-[#C9A84C] animate-spin" />}
-                    <span className="text-[9px] text-[#0C1B3A]/30 font-bold uppercase">Cloud · Auto-saved</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-[#080D1E]">Trade &amp; Sourcing · BOQ</span>
+                    <div className="h-px flex-1 bg-[#080D1E]/10" />
+                    {cloudHistoryLoading && <RefreshCw className="w-3.5 h-3.5 text-[#CBA85C] animate-spin" />}
+                    <span className="text-[9px] text-[#080D1E]/30 font-bold uppercase">Cloud · Auto-saved</span>
                   </div>
 
                   {!cloudHistoryLoading && cloudHistory.length === 0 && (
-                    <div className="text-center py-10 border-2 border-dashed border-[#0C1B3A]/8 rounded-[28px] text-[#0C1B3A]/30">
-                      <p className="text-sm font-serif italic">No cloud quotes yet</p>
+                    <div className="text-center py-10 border-2 border-dashed border-[#080D1E]/8 rounded-[28px] text-[#080D1E]/30">
+                      <p className="text-sm" style={{ fontFamily: "'Space Grotesk',sans-serif" }}>No cloud quotes yet</p>
                       <p className="text-[10px] mt-1">Quotes auto-save when you click Generate GCI Quote</p>
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 gap-3">
                     {cloudHistory.map(rec => {
-                      const statusColor = rec.status === 'SENT_TO_TRADE' ? 'bg-green-100 text-green-700' : rec.status === 'GENERATED' ? 'bg-[#C9A84C]/15 text-[#A07C2D]' : 'bg-[#0C1B3A]/8 text-[#0C1B3A]/50';
+                      const statusColor = rec.status === 'SENT_TO_TRADE' ? 'bg-green-100 text-green-700' : rec.status === 'GENERATED' ? 'bg-[#CBA85C]/15 text-[#A07C2D]' : 'bg-[#080D1E]/8 text-[#080D1E]/50';
                       return (
                         <div
                           key={rec.id}
-                          className="p-5 bg-white border border-[#0C1B3A]/8 rounded-[24px] flex items-center gap-5 hover:border-[#C9A84C] hover:shadow-lg transition-all group cursor-pointer"
+                          className="p-5 bg-white border border-[#080D1E]/8 rounded-[24px] flex items-center gap-5 hover:border-[#CBA85C] hover:shadow-lg transition-all group cursor-pointer"
                           onClick={() => handleLoadDraft(rec.quote_no)}
                         >
                           {/* Left: info */}
@@ -9392,16 +9392,16 @@ Leave a field as empty string if not present. Never fabricate values.`;
                               <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${statusColor}`}>
                                 {rec.status?.replace('_', ' ')}
                               </span>
-                              <span className="text-[9px] font-bold text-[#0C1B3A]/30 uppercase">{rec.quote_type}</span>
-                              {rec.source === 'DEAL' && <span className="text-[8px] font-black text-[#C9A84C] bg-[#C9A84C]/10 px-1.5 py-0.5 rounded">DEAL</span>}
+                              <span className="text-[9px] font-bold text-[#080D1E]/30 uppercase">{rec.quote_type}</span>
+                              {rec.source === 'DEAL' && <span className="text-[8px] font-black text-[#CBA85C] bg-[#CBA85C]/10 px-1.5 py-0.5 rounded">DEAL</span>}
                             </div>
-                            <h3 className="text-base font-black text-[#0C1B3A] truncate">{rec.customer_name || '—'}</h3>
-                            <p className="text-[10px] text-[#0C1B3A]/40 mt-0.5">{rec.quote_no} · {rec.quote_date} · {rec.salesperson || 'Staff'}</p>
+                            <h3 className="text-base font-black text-[#080D1E] truncate">{rec.customer_name || '—'}</h3>
+                            <p className="text-[10px] text-[#080D1E]/40 mt-0.5">{rec.quote_no} · {rec.quote_date} · {rec.salesperson || 'Staff'}</p>
                           </div>
                           {/* Right: amounts */}
                           <div className="text-right shrink-0">
-                            <p className="text-[9px] font-bold uppercase text-[#0C1B3A]/30">Grand Total</p>
-                            <p className="text-lg font-black font-mono text-[#0C1B3A]">AED {(rec.grand_total || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                            <p className="text-[9px] font-bold uppercase text-[#080D1E]/30">Grand Total</p>
+                            <p className="text-lg font-black font-mono text-[#080D1E]">AED {(rec.grand_total || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
                             {rec.margin_percent > 0 && <p className="text-[9px] text-green-600 font-bold">{rec.margin_percent.toFixed(1)}% margin</p>}
                           </div>
                           <button
@@ -9421,7 +9421,7 @@ Leave a field as empty string if not present. Never fabricate values.`;
                           >
                             Delete
                           </button>
-                          <ChevronRight className="w-5 h-5 text-[#0C1B3A]/20 group-hover:text-[#C9A84C] transition-colors shrink-0" />
+                          <ChevronRight className="w-5 h-5 text-[#080D1E]/20 group-hover:text-[#CBA85C] transition-colors shrink-0" />
                         </div>
                       );
                     })}
